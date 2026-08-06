@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "tools": [
+    {
+      "name": "valles",
+      "display_name": "Valles",
+      "description": "MMDAgent-EX のための遠隔操作アプリケーション",
+      "manifest": "tools/valles.json"
+    }
+  ]
+}

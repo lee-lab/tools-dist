@@ -1,0 +1,12 @@
+# ローカル検証用の一時ファイル
+/tmp/
+*.zip
+!wheels/*.whl
+
+# エディタ / OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 外部から配置される共有設定（レポジトリには含めない）
+.claude/
