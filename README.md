@@ -123,7 +123,23 @@ tools-dist/
 4. ツール側に `.github/workflows/release.yml` を置く（valles のものを雛形にする）
 5. ツール側のリポジトリに `TOOLS_DIST_TOKEN` シークレットを登録する
 
-`TOOLS_DIST_TOKEN` は、このリポジトリに対して `Contents: read and write` 権限を持つ fine-grained personal access token です。GitHub Actions の `GITHUB_TOKEN` は自分のリポジトリしか書けないため、クロスリポジトリ公開には使えません。組織のシークレットとして登録すれば、全ツールで使い回せます。
+`TOOLS_DIST_TOKEN` は、このリポジトリに対して `Contents: read and write` 権限を持つ fine-grained personal access token です。GitHub Actions の `GITHUB_TOKEN` は自分のリポジトリしか書けないため、クロスリポジトリ公開には使えません。
+
+トークン作成時の設定は次のとおりです。必要な権限は `Contents` の 1 つだけで、`Workflows` 権限は不要です（`.github/workflows/` を書き換えないため）。
+
+| 項目 | 値 |
+|---|---|
+| Resource owner | `lee-lab`（自分のアカウントにするとアクセスできません） |
+| Repository access | `Only select repositories` → `lee-lab/tools-dist` |
+| Repository permissions | `Contents: Read and write` |
+
+> **組織シークレットは使えません。** lee-lab は GitHub Free プランであり、組織シークレットは公開リポジトリからしか参照できません。ツール側のリポジトリは通常プライベートなので、**ツールごとにリポジトリシークレットとして登録**してください。同じトークンを各リポジトリに登録すれば流用できます。
+
+```shell
+gh secret set TOOLS_DIST_TOKEN --repo lee-lab/<tool>
+```
+
+トークンには有効期限があり、切れるとリリースワークフローが 403 で失敗します。エラーの見た目が権限設定の誤りと区別しづらいため、期限を長めに設定するか、期限日を記録しておいてください。
 
 ### PyOgg の wheel を再ビルドする
 

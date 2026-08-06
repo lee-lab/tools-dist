@@ -34,6 +34,12 @@
 - バージョンの唯一の情報源は `tools/<tool>.json`。GitHub の `/releases/latest` は全ツール横断で最新の 1 件を返すため使わないこと
 - `tools/index.json` への追加を忘れるとインストーラのメニューに出ない
 
+## リリース公開の権限
+
+- クロスリポジトリ公開に使う `TOOLS_DIST_TOKEN` は、**ツールごとにリポジトリシークレットとして登録すること**
+- lee-lab は GitHub Free プランのため、**組織シークレットは公開リポジトリからしか参照できない**。ツール側のリポジトリは通常プライベートなので組織シークレットでは動かない
+- トークンに必要な権限は `lee-lab/tools-dist` に対する `Contents: Read and write` の 1 つだけ。`Workflows` 権限は付けないこと
+
 ## wheels/
 
 - PyPI に無いパッケージのビルド済み wheel を置く場所
