@@ -54,6 +54,40 @@ New-Item -ItemType Directory -Force -Path $sandbox | Out-Null
 
 try {
 
+# --- ファイルの文字コード ---------------------------------------------------
+# install.ps1 は `irm <url> | iex` で実行される。Invoke-RestMethod は先頭の BOM を
+# 文字列に残すため、BOM があると `<#` がブロックコメント開始として認識されず、
+# コメント本文がすべてコードとして解釈されてスクリプト全体が壊れる。
+#
+# BOM を外せるのは、ファイルに非 ASCII バイトが 1 つも無い場合に限られる。BOM が
+# 無いと Windows PowerShell 5.1 はシステムのコードページ (日本語環境では cp932) で
+# 読むため、非 ASCII の文字が壊れるからである。
+Write-Host 'install.ps1 の文字コード' -ForegroundColor Yellow
+
+$bytes = [System.IO.File]::ReadAllBytes($InstallerPath)
+$hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+Check 'no BOM' (-not $hasBom)
+
+$nonAscii = 0
+foreach ($b in $bytes) { if ($b -ge 0x80) { $nonAscii++ } }
+Check 'pure ASCII' ($nonAscii -eq 0) "($nonAscii non-ASCII byte(s))"
+
+# irm | iex の経路を忠実に再現する。UTF8Encoding.GetString は BOM を除去しないため、
+# Invoke-RestMethod が返す文字列と同じものが得られる。
+# (System.Net.WebClient.DownloadString は BOM を除去してしまうので、検証に使わないこと)
+$asIrm = (New-Object System.Text.UTF8Encoding($false)).GetString($bytes)
+$irmErrors = $null
+[System.Management.Automation.Language.Parser]::ParseInput($asIrm, [ref]$null, [ref]$irmErrors) | Out-Null
+Check 'parses the way irm | iex sees it' ($irmErrors.Count -eq 0) `
+    ("first error: " + $(if ($irmErrors.Count) { "line $($irmErrors[0].Extent.StartLineNumber) $($irmErrors[0].Message)" } else { '' }))
+
+# 逆に、BOM を付けると壊れることも確認しておく（この検査自体が機能している証拠）
+$withBom = [string][char]0xFEFF + $asIrm
+$bomErrors = $null
+[System.Management.Automation.Language.Parser]::ParseInput($withBom, [ref]$null, [ref]$bomErrors) | Out-Null
+Check 'a BOM would break it (guard is meaningful)' ($bomErrors.Count -gt 0)
+
+
 # --- Get-Prop ---------------------------------------------------------------
 # StrictMode 下でマニフェストの任意項目を安全に読めることを確認する。
 Write-Host 'Get-Prop' -ForegroundColor Yellow

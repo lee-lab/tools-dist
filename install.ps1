@@ -1,53 +1,69 @@
-﻿<#
-    Lee Lab ツール共通インストーラ
+<#
+    Lee Lab shared tool installer
 
-    使い方（利用者向け）:
-        PowerShell を開いて次の 1 行を貼り付けて実行してください。
+    Usage (for end users):
+        Open PowerShell and paste the single line below.
 
         irm https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.ps1 | iex
 
-    インストールするツールを直接指定したい場合:
+    To install a specific tool without the menu:
         $env:LEELAB_TOOL = "valles"
         irm https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.ps1 | iex
 
-    管理者権限は不要です。すべて %LOCALAPPDATA%\LeeLab\ の下にインストールされます。
+    Administrator rights are not needed. Everything goes under %LOCALAPPDATA%\LeeLab\.
 
-    このスクリプトがやること:
-        1. uv (Python の環境管理ツール) を導入する
-        2. ツールが要求する Python を uv 経由で用意する（利用者が Python を入れる必要はない）
-        3. ツール本体を GitHub Releases から取得し、SHA256 で検証して展開する
-        4. 専用の仮想環境を作り、依存パッケージを導入する
-        5. デスクトップとスタートメニューにショートカットを作る
+    What this script does:
+        1. Install uv (a Python environment manager)
+        2. Let uv provide the Python the tool needs (the user never installs Python)
+        3. Fetch the tool from GitHub Releases, verify its SHA256, and extract it
+        4. Create a dedicated virtual environment and install the dependencies
+        5. Create shortcuts on the desktop and in the Start menu
 
-    Windows PowerShell 5.1（Windows 10 / 11 の標準）で動作します。
+    Runs on Windows PowerShell 5.1 (the default on Windows 10 / 11).
 #>
+
+# NOTE: This file must stay pure ASCII with NO byte order mark.
+#
+# It is executed both as a file and, more importantly, through
+# `irm <url> | iex`. Invoke-RestMethod keeps a leading BOM in the string it
+# returns, and a BOM in front of `<#` stops PowerShell from recognising the
+# block comment, so every comment line is then parsed as code and the whole
+# script fails. (System.Net.WebClient strips the BOM, so testing through that
+# class hides the problem -- test with Invoke-RestMethod.)
+#
+# Dropping the BOM is only safe while the file has no non-ASCII bytes at all:
+# without a BOM, Windows PowerShell 5.1 decodes the file using the system code
+# page (cp932 on Japanese Windows), which would corrupt any non-ASCII text.
+# Keeping the file ASCII-only makes both paths work. Write comments in English.
+#
+# tests/test-install.ps1 enforces this.
 
 [CmdletBinding()]
 param(
-    # インストールするツール名。省略時はメニューから選択します。
+    # Name of the tool to install. When omitted, a menu is shown.
     [string] $Tool = '',
 
-    # 配布リポジトリのベース URL。フォーク時や検証時のみ変更してください。
+    # Base URL of the distribution repository. Change only for forks or testing.
     [string] $BaseUrl = '',
 
-    # インストール先のルート。省略時は %LOCALAPPDATA%\LeeLab
+    # Root install location. Defaults to %LOCALAPPDATA%\LeeLab
     [string] $InstallRoot = '',
 
-    # 確認を求めずに処理を進めます（更新の自動化用）。
+    # Proceed without asking for confirmation (for automated updates).
     [switch] $Quiet
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# 古い .NET の既定では TLS 1.2 が無効なことがあり、GitHub への接続に失敗する。
+# Older .NET defaults leave TLS 1.2 disabled, which breaks connections to GitHub.
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# Invoke-WebRequest の進捗表示は 5.1 で極端に遅いため抑制する。
+# The Invoke-WebRequest progress bar is extremely slow on 5.1, so suppress it.
 $ProgressPreference = 'SilentlyContinue'
 
 # ---------------------------------------------------------------------------
-# 定数
+# Constants
 # ---------------------------------------------------------------------------
 
 $DefaultBaseUrl = 'https://raw.githubusercontent.com/lee-lab/tools-dist/main'
@@ -67,7 +83,7 @@ if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
 }
 
 # ---------------------------------------------------------------------------
-# 表示ヘルパ
+# Console output helpers
 # ---------------------------------------------------------------------------
 
 function Write-Head([string] $Text) {
@@ -101,8 +117,8 @@ function Fail([string] $Text) {
     exit 1
 }
 
-# StrictMode 下では存在しないプロパティへのアクセスが例外になるため、
-# マニフェストの任意項目はこのヘルパ経由で読む。
+# Under StrictMode, reading a property that does not exist throws, so optional
+# manifest fields must be read through this helper.
 function Get-Prop($Object, [string] $Name, $Default = $null) {
     if ($null -eq $Object) { return $Default }
     $prop = $Object.PSObject.Properties[$Name]
@@ -112,11 +128,11 @@ function Get-Prop($Object, [string] $Name, $Default = $null) {
 }
 
 # ---------------------------------------------------------------------------
-# 実行環境の確認
+# Environment checks
 # ---------------------------------------------------------------------------
 
 function Test-Environment {
-    # 配布している wheel と PyTorch は 64bit x86 Windows 用のみ。
+    # The wheels we ship and PyTorch are for 64-bit x86 Windows only.
     $arch = $env:PROCESSOR_ARCHITECTURE
     if ($env:PROCESSOR_ARCHITEW6432) { $arch = $env:PROCESSOR_ARCHITEW6432 }
     if ($arch -ne 'AMD64') {
@@ -128,13 +144,13 @@ function Test-Environment {
 }
 
 # ---------------------------------------------------------------------------
-# ダウンロード
+# Downloading
 # ---------------------------------------------------------------------------
 
 function Get-RemoteJson([string] $Url) {
-    # 配信側が Content-Type に charset を付けてくるとは限らない。付いていないと
-    # Invoke-WebRequest は既定の文字コードで復号してしまい、マニフェスト中の
-    # 日本語が化ける。UTF-8 と明示して読む。
+    # The server does not necessarily send a charset in Content-Type. Without one,
+    # Invoke-WebRequest decodes using the default code page and any non-ASCII text
+    # in the manifest is mangled. Read it as UTF-8 explicitly.
     $client = $null
     try {
         $client = New-Object System.Net.WebClient
@@ -147,7 +163,7 @@ function Get-RemoteJson([string] $Url) {
         if ($null -ne $client) { $client.Dispose() }
     }
 
-    # BOM 付きで配信されている場合、先頭の文字が残ると ConvertFrom-Json が失敗する。
+    # If the file is served with a BOM, a leading U+FEFF makes ConvertFrom-Json fail.
     if ($text.Length -gt 0 -and $text[0] -eq [char] 0xFEFF) { $text = $text.Substring(1) }
 
     try {
@@ -163,8 +179,8 @@ function Save-RemoteFile([string] $Url, [string] $Destination, [string] $Sha256 
 
     $client = $null
     try {
-        # WebClient は Invoke-WebRequest と違いストリーミングで保存するため、
-        # 数百 MB のファイルでもメモリを消費しない。リダイレクトも追跡する。
+        # Unlike Invoke-WebRequest, WebClient streams straight to disk, so it does
+        # not hold hundreds of megabytes in memory. It also follows redirects.
         $client = New-Object System.Net.WebClient
         $client.Headers.Add('User-Agent', 'leelab-tools-dist-installer')
         $client.DownloadFile($Url, $Destination)
@@ -190,14 +206,14 @@ function Test-FileHash([string] $Path, [string] $Expected) {
 }
 
 # ---------------------------------------------------------------------------
-# 配布物の復号
+# Decrypting the package
 #
-# 一般公開前のツールは、配布物を暗号化した状態で置いてある。中身を取り出すには
-# 開発者から知らされたパスワードが必要になる。
+# Tools that have not been released publicly are stored encrypted. Extracting them
+# requires the password the developer gave to the user.
 #
-# 形式は OpenSSL の `enc -aes-256-cbc -pbkdf2 -md sha256 -salt` と同じ:
-#     "Salted__"(8 バイト) + salt(8 バイト) + 暗号文
-# 鍵と IV は PBKDF2-HMAC-SHA256 で導出した 48 バイトの先頭 32 / 続く 16 を使う。
+# The format matches OpenSSL's `enc -aes-256-cbc -pbkdf2 -md sha256 -salt`:
+#     "Salted__" (8 bytes) + salt (8 bytes) + ciphertext
+# The key and IV are the first 32 and next 16 bytes of a 48-byte PBKDF2-HMAC-SHA256
 # ---------------------------------------------------------------------------
 
 function Unprotect-OpenSslFile {
@@ -234,7 +250,7 @@ function Unprotect-OpenSslFile {
             try {
                 $outStream = [System.IO.File]::Create($OutPath)
                 try {
-                    # 大きな配布物でもメモリに載せずに済むよう、ストリームで処理する。
+                    # Stream it so that large packages never sit in memory.
                     $cs = New-Object System.Security.Cryptography.CryptoStream(
                         $inStream, $decryptor, [System.Security.Cryptography.CryptoStreamMode]::Read)
                     $cs.CopyTo($outStream)
@@ -254,7 +270,7 @@ function Unprotect-OpenSslFile {
 }
 
 function Read-InstallPassword {
-    # 自動化・検証用の抜け道。通常の利用者は対話入力になる。
+    # Escape hatch for automation and testing. Real users type it in.
     if (-not [string]::IsNullOrEmpty($env:LEELAB_PASSWORD)) { return $env:LEELAB_PASSWORD }
 
     $secure = Read-Host '  Password' -AsSecureString
@@ -285,8 +301,8 @@ function Unlock-Package {
         try {
             Unprotect-OpenSslFile -InPath $EncPath -OutPath $ZipPath `
                 -Password $password -Iterations $Iterations
-            # パスワードが違うとパディング検証で例外になるのが通常だが、
-            # まれに例外にならずに壊れたデータが出てくる。ハッシュで最終確認する。
+            # A wrong password normally fails PKCS7 padding validation, but it can
+            # occasionally produce garbage instead. Confirm with the hash.
             $ok = Test-FileHash $ZipPath $ExpectedSha256
         } catch {
             $ok = $false
@@ -303,7 +319,7 @@ function Unlock-Package {
         if ($attempt -lt 3) {
             Write-Warn "Incorrect password. Please try again. ($(3 - $attempt) attempt(s) left)"
             if (-not [string]::IsNullOrEmpty($env:LEELAB_PASSWORD)) {
-                # 環境変数で渡された値が誤っている場合、繰り返しても結果は変わらない。
+                # A wrong value passed via the environment will not change on retry.
                 break
             }
         }
@@ -312,18 +328,18 @@ function Unlock-Package {
 }
 
 # ---------------------------------------------------------------------------
-# uv の導入
+# Installing uv
 # ---------------------------------------------------------------------------
 
 function Install-Uv {
-    # すでに PATH にあればそれを使う。
+    # Use it if it is already on PATH.
     $existing = Get-Command uv -ErrorAction SilentlyContinue
     if ($existing) {
         Write-Ok "uv is already installed ($($existing.Source))"
         return $existing.Source
     }
 
-    # 公式インストーラの既定の配置先。PATH 未反映でもここを直接見る。
+    # Default location used by the official installer. Look here even if PATH is stale.
     $uvHome = Join-Path $env:USERPROFILE '.local\bin'
     $uvExe  = Join-Path $uvHome 'uv.exe'
     if (Test-Path $uvExe) {
@@ -336,15 +352,15 @@ function Install-Uv {
     $scriptPath = Join-Path ([System.IO.Path]::GetTempPath()) 'leelab-uv-install.ps1'
     try {
         $content = (Invoke-WebRequest -Uri $UvInstallerUrl -UseBasicParsing).Content
-        # astral.sh はスクリプトをテキストとして宣言しないことがあり、その場合
-        # Invoke-WebRequest は文字列ではなくバイト列を返す。
+        # astral.sh does not always declare the script as text, in which case
+        # Invoke-WebRequest returns a byte array rather than a string.
         if ($content -is [byte[]]) {
             $content = [System.Text.Encoding]::UTF8.GetString($content)
         }
 
-        # 公式インストーラは自前のエラーハンドリングを持つため、こちらの
-        # StrictMode / ErrorActionPreference の影響を受けないよう別プロセスで走らせる。
-        # (Invoke-Expression でこのスコープに読み込むと誤動作する)
+        # The official installer has its own error handling, so run it in a separate
+        # process to keep it clear of our StrictMode / ErrorActionPreference.
+        # (Loading it into this scope with Invoke-Expression misbehaves.)
         $utf8Bom = New-Object System.Text.UTF8Encoding($true)
         [System.IO.File]::WriteAllText($scriptPath, $content, $utf8Bom)
 
@@ -367,12 +383,12 @@ function Install-Uv {
     return $uvExe
 }
 
-# 外部コマンドを実行し、標準出力と標準エラーをまとめて返す。
+# Runs an external command and returns stdout and stderr together.
 #
-# uv をはじめ多くのコマンドは進捗表示を標準エラーに書く。$ErrorActionPreference が
-# 'Stop' のままだと、PowerShell はそれを NativeCommandError という終了エラーとして
-# 扱ってしまい、正常に動いているコマンドの途中でスクリプトが止まる。
-# そのため、この呼び出しの間だけ設定を緩め、成否は終了コードで判断する。
+# uv, like many commands, writes progress to stderr. With $ErrorActionPreference
+# left at 'Stop', PowerShell treats that as a terminating NativeCommandError and
+# aborts the script in the middle of a command that is working fine.
+# So relax the setting just for the call and judge success by the exit code.
 function Invoke-Native([string] $Exe, [string[]] $NativeArgs) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -385,7 +401,7 @@ function Invoke-Native([string] $Exe, [string[]] $NativeArgs) {
 }
 
 function Invoke-Uv([string] $UvExe, [string[]] $UvArgs, [string] $FailMessage) {
-    # 標準エラーもまとめて拾い、失敗時だけ表示する（成功時のログは冗長なので出さない）。
+    # Capture stderr too, and show it only on failure (success logs are noise).
     $output = Invoke-Native $UvExe $UvArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Host ''
@@ -395,7 +411,7 @@ function Invoke-Uv([string] $UvExe, [string[]] $UvArgs, [string] $FailMessage) {
 }
 
 # ---------------------------------------------------------------------------
-# ショートカット
+# Shortcuts
 # ---------------------------------------------------------------------------
 
 function New-Shortcut {
@@ -414,8 +430,9 @@ function New-Shortcut {
     $lnk = $shell.CreateShortcut($Path)
     $lnk.TargetPath = $Target
     $lnk.Arguments = $Arguments
-    # settings.json やコンテンツキャッシュはカレントディレクトリ相対で保存されるため、
-    # 作業ディレクトリの指定は必須。ここを誤ると設定が別の場所に書かれる。
+    # settings.json and the content caches are saved relative to the current
+    # directory, so the working directory must be set. Getting this wrong writes
+    # the user's settings somewhere else.
     $lnk.WorkingDirectory = $WorkingDirectory
     if ($IconPath -and (Test-Path $IconPath)) { $lnk.IconLocation = $IconPath }
     $lnk.Description = $Description
@@ -423,7 +440,7 @@ function New-Shortcut {
 }
 
 # ---------------------------------------------------------------------------
-# ツール選択
+# Tool selection
 # ---------------------------------------------------------------------------
 
 function Select-Tool($Index) {
@@ -460,7 +477,7 @@ function Select-Tool($Index) {
 }
 
 # ---------------------------------------------------------------------------
-# 展開（zip 内の単一ルートフォルダを取り除く）
+# Extraction (strips a single root folder inside the zip)
 # ---------------------------------------------------------------------------
 
 function Expand-Package([string] $ZipPath, [string] $Destination) {
@@ -469,8 +486,8 @@ function Expand-Package([string] $ZipPath, [string] $Destination) {
     try {
         Expand-Archive -Path $ZipPath -DestinationPath $staging -Force
 
-        # zip が単一のフォルダで包まれている場合（valles-1.0.0/ など）は
-        # そのフォルダの中身を展開先に置く。
+        # When the zip is wrapped in one folder (valles-1.0.0/ and the like),
+        # place the contents of that folder into the destination.
         $entries = @(Get-ChildItem -Force $staging)
         $source = $staging
         if ($entries.Count -eq 1 -and $entries[0].PSIsContainer) {
@@ -488,7 +505,7 @@ function Expand-Package([string] $ZipPath, [string] $Destination) {
 }
 
 # ---------------------------------------------------------------------------
-# 更新時のユーザデータ退避
+# Preserving user data across updates
 # ---------------------------------------------------------------------------
 
 function Save-UserData([string] $AppDir, [string[]] $Paths) {
@@ -530,7 +547,7 @@ function Restore-UserData([string] $Backup, [string] $AppDir) {
 }
 
 # ---------------------------------------------------------------------------
-# アンインストール情報の登録（Windows の「アプリと機能」に表示させる）
+# Registering uninstall info (so it appears in Windows "Apps & features")
 # ---------------------------------------------------------------------------
 
 function Register-Uninstall {
@@ -607,7 +624,7 @@ foreach (`$s in `$shortcuts) {
 }
 Remove-Item -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LeeLab-$Name' -Recurse -Force
 
-# 自分自身がツールフォルダの中にあるため、削除は別プロセスに任せる。
+# This script lives inside the tool folder, so hand the deletion to another process.
 Start-Process -WindowStyle Hidden powershell.exe -ArgumentList @(
     '-NoProfile', '-Command',
     "Start-Sleep -Seconds 2; Remove-Item -Recurse -Force '`$toolRoot'"
@@ -618,13 +635,13 @@ Write-Host '  Uninstalled.'
 Write-Host ''
 "@
     $path = Join-Path $ToolRoot 'uninstall.ps1'
-    # Windows PowerShell 5.1 が確実に読めるよう BOM 付き UTF-8 で書く。
+    # Write UTF-8 with a BOM so Windows PowerShell 5.1 reads it reliably.
     $utf8Bom = New-Object System.Text.UTF8Encoding($true)
     [System.IO.File]::WriteAllText($path, $content, $utf8Bom)
 }
 
 # ---------------------------------------------------------------------------
-# 本体
+# Main
 # ---------------------------------------------------------------------------
 
 function Install-Tool($Entry) {
@@ -646,7 +663,7 @@ function Install-Tool($Entry) {
     $venvDir  = Join-Path $toolRoot '.venv'
     $stateFile = Join-Path $toolRoot 'install.json'
 
-    # --- 既存インストールの確認 -------------------------------------------
+    # --- Check for an existing installation --------------------------------
     $installed = $null
     if (Test-Path $stateFile) {
         try { $installed = Get-Content -Raw $stateFile | ConvertFrom-Json } catch { $installed = $null }
@@ -672,7 +689,7 @@ function Install-Tool($Entry) {
     Write-Host "  Install location: $toolRoot" -ForegroundColor DarkGray
     Write-Host ''
 
-    # --- uv と Python ------------------------------------------------------
+    # --- uv and Python -----------------------------------------------------
     $uv = Install-Uv
 
     $python = Get-Prop $m 'python' '3.12'
@@ -681,7 +698,7 @@ function Install-Tool($Entry) {
         "Failed to install Python $python."
     Write-Ok "Python $python is ready"
 
-    # --- 本体の取得 --------------------------------------------------------
+    # --- Fetch the package -------------------------------------------------
     $work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
     New-Item -ItemType Directory -Force -Path $work | Out-Null
 
@@ -692,8 +709,8 @@ function Install-Tool($Entry) {
         $zipPath = Join-Path $work 'package.zip'
 
         if ($isEncrypted) {
-            # 暗号化されている場合、マニフェストのハッシュは復号後の zip のもの。
-            # ダウンロード直後には照合できないため、復号のあとで検証する。
+            # When encrypted, the manifest hash is that of the decrypted zip, so it
+            # cannot be checked on download. Verify it after decryption instead.
             $encPath = Join-Path $work 'package.enc'
             Save-RemoteFile $pkgUrl $encPath
             Write-Ok 'Download complete'
@@ -705,7 +722,7 @@ function Install-Tool($Entry) {
             Write-Ok 'Download complete'
         }
 
-        # 更新の場合、設定・キャッシュを退避してから展開する。
+        # On update, move the settings and caches aside before extracting.
         $preserve = @(Get-Prop $m 'preserve' @())
         $backup = Save-UserData $appDir $preserve
 
@@ -714,8 +731,8 @@ function Install-Tool($Entry) {
         Restore-UserData $backup $appDir
         Write-Ok 'Extracted'
 
-        # --- 依存パッケージ -------------------------------------------------
-        # PyPI に無い wheel（PyOgg 0.7 など）を先に取得し、--find-links で参照させる。
+        # --- Dependencies ---------------------------------------------------
+        # Fetch wheels that are not on PyPI (PyOgg 0.7) and point pip at them.
         $wheelDir = Join-Path $work 'wheels'
         New-Item -ItemType Directory -Force -Path $wheelDir | Out-Null
         $wheels = @(Get-Prop $m 'wheels' @())
@@ -726,10 +743,10 @@ function Install-Tool($Entry) {
         if ($wheels.Count -gt 0) { Write-Ok "Fetched bundled components ($($wheels.Count) item(s))" }
 
         Write-Step 'Creating an isolated Python environment...'
-        # --clear が無いと、更新時に「既に存在する」で失敗する。
-        # 作り直すことで、旧バージョンで使っていて今は不要になったパッケージが
-        # 残り続けるのも防げる。uv はダウンロード済みの wheel をキャッシュから
-        # 再利用するため、再作成でも通信は発生しない。
+        # Without --clear this fails on update because the environment exists.
+        # Recreating it also stops packages that an older version needed, and that
+        # are no longer required, from lingering. uv reuses already-downloaded
+        # wheels from its cache, so recreating costs no network traffic.
         Invoke-Uv $uv @('venv', '--clear', '--python', $python, $venvDir) 'Failed to create the Python environment.'
 
         $venvPython = Join-Path $venvDir 'Scripts\python.exe'
@@ -752,7 +769,7 @@ function Install-Tool($Entry) {
         Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
     }
 
-    # --- ショートカット ----------------------------------------------------
+    # --- Shortcuts ---------------------------------------------------------
     $entryScript = Get-Prop $m 'entry' 'main.py'
     $iconName = Get-Prop $m 'icon' ''
     $iconPath = ''
@@ -785,7 +802,7 @@ function Install-Tool($Entry) {
         [void] $createdShortcuts.Add($p)
     }
     if ($wantConsole) {
-        # 不具合調査用。コンソールを表示したまま起動し、エラーメッセージを読めるようにする。
+        # For troubleshooting: keeps the console open so errors stay readable.
         $p = Join-Path $startMenuDir "$displayName (Diagnostic Mode).lnk"
         New-Shortcut -Path $p -Target $venvPython -Arguments $entryScript `
             -WorkingDirectory $appDir -IconPath $iconPath `
@@ -794,7 +811,7 @@ function Install-Tool($Entry) {
     }
     Write-Ok "Created shortcuts ($($createdShortcuts.Count) item(s))"
 
-    # --- 状態の記録 --------------------------------------------------------
+    # --- Record the state --------------------------------------------------
     $state = [ordered] @{
         name         = $name
         display_name = $displayName
@@ -812,7 +829,7 @@ function Install-Tool($Entry) {
     Register-Uninstall -Name $name -DisplayName $displayName -Version $version `
         -ToolRoot $toolRoot -IconPath $iconPath
 
-    # --- 完了 --------------------------------------------------------------
+    # --- Done --------------------------------------------------------------
     Write-Host ''
     Write-Host "  $displayName $version was installed successfully." -ForegroundColor Green
     Write-Host ''
@@ -835,7 +852,7 @@ function Install-Tool($Entry) {
 }
 
 # ---------------------------------------------------------------------------
-# エントリポイント
+# Entry point
 # ---------------------------------------------------------------------------
 
 Write-Host ''

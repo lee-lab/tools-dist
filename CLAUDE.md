@@ -10,7 +10,12 @@
 
 ## install.ps1 を編集するときの必須事項
 
-- **UTF-8 BOM 付きで保存すること。** Windows PowerShell 5.1 は BOM 無し UTF-8 を cp932 として読むため、BOM が無いと日本語が壊れて構文エラーになる
+- **`install.ps1` は BOM 無し・純 ASCII で保存すること。コメントも英語で書くこと。**
+  - `irm <url> | iex` で実行されるが、**`Invoke-RestMethod` は先頭の BOM を文字列に残す。** BOM があると `<#` がブロックコメント開始として認識されず、コメント本文がすべてコードとして解釈されてスクリプト全体が壊れる
+  - BOM を外せるのは非 ASCII バイトが 1 つも無い場合に限る。BOM が無いと PowerShell 5.1 はシステムのコードページ（日本語環境では cp932）で読むため、非 ASCII の文字が壊れる
+  - `tests/test-install.ps1` がこれを強制している（BOM の有無・純 ASCII・irm 経路での解析）
+  - **`System.Net.WebClient.DownloadString` は BOM を除去してしまうため、検証に使わないこと。** これで確認して問題を見逃した実績がある
+- 一方、**テストスクリプトと生成する `uninstall.ps1` は BOM 付き UTF-8 のまま**でよい。これらは `-File` でしか実行されず `iex` を通らないため、BOM があっても壊れない。むしろ非 ASCII を含む可能性があるため BOM が必要
 - **Windows PowerShell 5.1 の構文だけを使うこと。** 三項演算子、`??`、`Join-Path` の 3 引数以上、`ConvertFrom-Json -AsHashtable` は使えない
 - `Set-StrictMode -Version Latest` を有効にしているため、マニフェストの任意項目は必ず `Get-Prop` 経由で読むこと（存在しないプロパティへの直接アクセスは例外になる）
 - 管理者権限を要求しないこと。インストール先は `%LOCALAPPDATA%\LeeLab\` 配下に限る
@@ -18,7 +23,7 @@
   - 対象: `Write-Host` / `Read-Host` / `Fail` などの出力、生成する `uninstall.ps1` の内容、ショートカット名、マニフェストの `display_name` / `description` / `notes`、リリースノート
   - 対象外: コード内コメント、ファイル冒頭の説明ブロック、本ファイルや README の開発者向け記述（これらは日本語でよい）
   - 専門用語を避け、平易な英語で書くこと。エラー時は「開発者に連絡してください」に相当する案内まで含めること
-- なお、コード内コメントは日本語のままなので、**BOM 付き UTF-8 で保存する必要は変わらない**
+- `install.ps1` はコメントも含めて英語・純 ASCII とする（上記の文字コードの制約による）
 
 ### 実機で踏んだ罠（デグレさせないこと）
 
