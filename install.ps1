@@ -132,13 +132,26 @@ function Test-Environment {
 # ---------------------------------------------------------------------------
 
 function Get-RemoteJson([string] $Url) {
+    # 配信側が Content-Type に charset を付けてくるとは限らない。付いていないと
+    # Invoke-WebRequest は既定の文字コードで復号してしまい、マニフェスト中の
+    # 日本語が化ける。UTF-8 と明示して読む。
+    $client = $null
     try {
-        $raw = Invoke-WebRequest -Uri $Url -UseBasicParsing
+        $client = New-Object System.Net.WebClient
+        $client.Encoding = [System.Text.Encoding]::UTF8
+        $client.Headers.Add('User-Agent', 'leelab-tools-dist-installer')
+        $text = $client.DownloadString($Url)
     } catch {
         Fail "配布情報を取得できませんでした: $Url`n         インターネット接続を確認してください。詳細: $($_.Exception.Message)"
+    } finally {
+        if ($null -ne $client) { $client.Dispose() }
     }
+
+    # BOM 付きで配信されている場合、先頭の文字が残ると ConvertFrom-Json が失敗する。
+    if ($text.Length -gt 0 -and $text[0] -eq [char] 0xFEFF) { $text = $text.Substring(1) }
+
     try {
-        return $raw.Content | ConvertFrom-Json
+        return $text | ConvertFrom-Json
     } catch {
         Fail "配布情報の形式が不正です: $Url"
     }
@@ -207,7 +220,7 @@ function Install-Uv {
         $utf8Bom = New-Object System.Text.UTF8Encoding($true)
         [System.IO.File]::WriteAllText($scriptPath, $content, $utf8Bom)
 
-        $log = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $log = Invoke-Native 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath)
         if ($LASTEXITCODE -ne 0) {
             $log | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
             Fail 'uv の導入に失敗しました。'
@@ -226,9 +239,26 @@ function Install-Uv {
     return $uvExe
 }
 
+# 外部コマンドを実行し、標準出力と標準エラーをまとめて返す。
+#
+# uv をはじめ多くのコマンドは進捗表示を標準エラーに書く。$ErrorActionPreference が
+# 'Stop' のままだと、PowerShell はそれを NativeCommandError という終了エラーとして
+# 扱ってしまい、正常に動いているコマンドの途中でスクリプトが止まる。
+# そのため、この呼び出しの間だけ設定を緩め、成否は終了コードで判断する。
+function Invoke-Native([string] $Exe, [string[]] $NativeArgs) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $Exe @NativeArgs 2>&1
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    return $output
+}
+
 function Invoke-Uv([string] $UvExe, [string[]] $UvArgs, [string] $FailMessage) {
     # 標準エラーもまとめて拾い、失敗時だけ表示する（成功時のログは冗長なので出さない）。
-    $output = & $UvExe @UvArgs 2>&1
+    $output = Invoke-Native $UvExe $UvArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Host ''
         $output | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
@@ -419,6 +449,11 @@ function Write-UninstallScript {
     $content = @"
 # $DisplayName をアンインストールします。
 # このファイルはインストーラが自動生成しました。
+#
+# Windows の「設定 > アプリ」から実行されるほか、確認を省いて実行することもできます。
+#     powershell -ExecutionPolicy Bypass -File uninstall.ps1 -Yes
+param([switch] `$Yes)
+
 `$ErrorActionPreference = 'SilentlyContinue'
 
 `$toolRoot = '$($ToolRoot.Replace("'", "''"))'
@@ -430,10 +465,12 @@ Write-Host ''
 Write-Host '  $DisplayName をアンインストールします。'
 Write-Host "  削除先: `$toolRoot"
 Write-Host ''
-`$answer = Read-Host '  よろしいですか? (y/N)'
-if (`$answer -ne 'y' -and `$answer -ne 'Y') {
-    Write-Host '  中止しました。'
-    exit 0
+if (-not `$Yes) {
+    `$answer = Read-Host '  よろしいですか? (y/N)'
+    if (`$answer -ne 'y' -and `$answer -ne 'Y') {
+        Write-Host '  中止しました。'
+        exit 0
+    }
 }
 
 foreach (`$s in `$shortcuts) {
@@ -546,7 +583,11 @@ function Install-Tool($Entry) {
         if ($wheels.Count -gt 0) { Write-Ok "同梱 wheel を取得しました ($($wheels.Count) 件)" }
 
         Write-Step '仮想環境を作成中...'
-        Invoke-Uv $uv @('venv', '--python', $python, $venvDir) '仮想環境の作成に失敗しました。'
+        # --clear が無いと、更新時に「既に存在する」で失敗する。
+        # 作り直すことで、旧バージョンで使っていて今は不要になったパッケージが
+        # 残り続けるのも防げる。uv はダウンロード済みの wheel をキャッシュから
+        # 再利用するため、再作成でも通信は発生しない。
+        Invoke-Uv $uv @('venv', '--clear', '--python', $python, $venvDir) '仮想環境の作成に失敗しました。'
 
         $venvPython = Join-Path $venvDir 'Scripts\python.exe'
         if (-not (Test-Path $venvPython)) { Fail '仮想環境の作成に失敗しました。' }
