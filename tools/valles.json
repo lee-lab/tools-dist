@@ -3,12 +3,13 @@
   "name": "valles",
   "display_name": "Valles",
   "description": "Remote control application for MMDAgent-EX",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "python": "3.12",
   "package": {
-    "_comment": "url と sha256 はリリースワークフローが自動で埋めます。url が空の間、インストーラは「まだリリースされていません」と案内して終了します。",
-    "url": "",
-    "sha256": ""
+    "url": "https://github.com/lee-lab/tools-dist/releases/download/valles-v1.0.0/valles-1.0.0.zip.enc",
+    "sha256": "ae9327da32b71d55e9b7e93196a2d8a8d709d5d40957cdd75a1fc3baac80f30f",
+    "encrypted": true,
+    "kdf_iterations": 200000
   },
   "requirements": "requirements.txt",
   "entry": "main.py",
