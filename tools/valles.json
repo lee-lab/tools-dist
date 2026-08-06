@@ -6,7 +6,8 @@
   "version": "0.0.0",
   "python": "3.12",
   "package": {
-    "url": "https://github.com/lee-lab/tools-dist/releases/download/valles-v0.0.0/valles-0.0.0.zip",
+    "_comment": "url と sha256 はリリースワークフローが自動で埋めます。url が空の間、インストーラは「まだリリースされていません」と案内して終了します。",
+    "url": "",
     "sha256": ""
   },
   "requirements": "requirements.txt",
