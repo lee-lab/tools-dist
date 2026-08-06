@@ -93,10 +93,10 @@ function Write-Warn([string] $Text) {
 
 function Fail([string] $Text) {
     Write-Host ''
-    Write-Host '  エラー: ' -ForegroundColor Red -NoNewline
+    Write-Host '  Error: ' -ForegroundColor Red -NoNewline
     Write-Host $Text -ForegroundColor Red
     Write-Host ''
-    Write-Host '  解決しない場合は、この画面をそのままコピーして開発者に連絡してください。' -ForegroundColor DarkGray
+    Write-Host '  If this keeps happening, copy this screen and send it to the developer.' -ForegroundColor DarkGray
     Write-Host ''
     exit 1
 }
@@ -120,10 +120,10 @@ function Test-Environment {
     $arch = $env:PROCESSOR_ARCHITECTURE
     if ($env:PROCESSOR_ARCHITEW6432) { $arch = $env:PROCESSOR_ARCHITEW6432 }
     if ($arch -ne 'AMD64') {
-        Fail "64bit 版の Windows が必要です (検出: $arch)。ARM 版 Windows には対応していません。"
+        Fail "64-bit Windows is required (detected: $arch). Windows on ARM is not supported."
     }
     if ($PSVersionTable.PSVersion.Major -lt 5) {
-        Fail "PowerShell 5.0 以降が必要です (検出: $($PSVersionTable.PSVersion))。"
+        Fail "PowerShell 5.0 or later is required (detected: $($PSVersionTable.PSVersion))."
     }
 }
 
@@ -142,7 +142,7 @@ function Get-RemoteJson([string] $Url) {
         $client.Headers.Add('User-Agent', 'leelab-tools-dist-installer')
         $text = $client.DownloadString($Url)
     } catch {
-        Fail "配布情報を取得できませんでした: $Url`n         インターネット接続を確認してください。詳細: $($_.Exception.Message)"
+        Fail "Could not fetch the distribution info: $Url`n         Please check your internet connection. Details: $($_.Exception.Message)"
     } finally {
         if ($null -ne $client) { $client.Dispose() }
     }
@@ -153,7 +153,7 @@ function Get-RemoteJson([string] $Url) {
     try {
         return $text | ConvertFrom-Json
     } catch {
-        Fail "配布情報の形式が不正です: $Url"
+        Fail "The distribution info is malformed: $Url"
     }
 }
 
@@ -169,7 +169,7 @@ function Save-RemoteFile([string] $Url, [string] $Destination, [string] $Sha256 
         $client.Headers.Add('User-Agent', 'leelab-tools-dist-installer')
         $client.DownloadFile($Url, $Destination)
     } catch {
-        Fail "ダウンロードに失敗しました: $Url`n         詳細: $($_.Exception.Message)"
+        Fail "Download failed: $Url`n         Details: $($_.Exception.Message)"
     } finally {
         if ($null -ne $client) { $client.Dispose() }
     }
@@ -178,9 +178,137 @@ function Save-RemoteFile([string] $Url, [string] $Destination, [string] $Sha256 
         $actual = (Get-FileHash -Path $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actual -ne $Sha256.ToLowerInvariant()) {
             Remove-Item -Force $Destination -ErrorAction SilentlyContinue
-            Fail "ダウンロードしたファイルが壊れています（ハッシュ不一致）。`n         時間をおいて再実行してください。"
+            Fail "The downloaded file is corrupted (checksum mismatch).`n         Please wait a moment and run the command again."
         }
     }
+}
+
+function Test-FileHash([string] $Path, [string] $Expected) {
+    if ([string]::IsNullOrWhiteSpace($Expected)) { return $true }
+    $actual = (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    return ($actual -eq $Expected.ToLowerInvariant())
+}
+
+# ---------------------------------------------------------------------------
+# 配布物の復号
+#
+# 一般公開前のツールは、配布物を暗号化した状態で置いてある。中身を取り出すには
+# 開発者から知らされたパスワードが必要になる。
+#
+# 形式は OpenSSL の `enc -aes-256-cbc -pbkdf2 -md sha256 -salt` と同じ:
+#     "Salted__"(8 バイト) + salt(8 バイト) + 暗号文
+# 鍵と IV は PBKDF2-HMAC-SHA256 で導出した 48 バイトの先頭 32 / 続く 16 を使う。
+# ---------------------------------------------------------------------------
+
+function Unprotect-OpenSslFile {
+    param(
+        [string] $InPath,
+        [string] $OutPath,
+        [string] $Password,
+        [int] $Iterations
+    )
+    $inStream = [System.IO.File]::OpenRead($InPath)
+    try {
+        $header = New-Object byte[] 16
+        if ($inStream.Read($header, 0, 16) -ne 16) { throw 'The package file is corrupted.' }
+        if ([System.Text.Encoding]::ASCII.GetString($header, 0, 8) -ne 'Salted__') {
+            throw 'The package is not in the expected format.'
+        }
+        $salt = $header[8..15]
+
+        $pwBytes = [System.Text.Encoding]::UTF8.GetBytes($Password)
+        $kdf = New-Object System.Security.Cryptography.Rfc2898DeriveBytes(
+            [byte[]] $pwBytes, [byte[]] $salt, $Iterations,
+            [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+        try { $keyIv = $kdf.GetBytes(48) } finally { $kdf.Dispose() }
+
+        $aes = [System.Security.Cryptography.Aes]::Create()
+        try {
+            $aes.KeySize = 256
+            $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC
+            $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
+            $aes.Key = $keyIv[0..31]
+            $aes.IV  = $keyIv[32..47]
+
+            $decryptor = $aes.CreateDecryptor()
+            try {
+                $outStream = [System.IO.File]::Create($OutPath)
+                try {
+                    # 大きな配布物でもメモリに載せずに済むよう、ストリームで処理する。
+                    $cs = New-Object System.Security.Cryptography.CryptoStream(
+                        $inStream, $decryptor, [System.Security.Cryptography.CryptoStreamMode]::Read)
+                    $cs.CopyTo($outStream)
+                    $cs.Dispose()
+                } finally {
+                    $outStream.Dispose()
+                }
+            } finally {
+                $decryptor.Dispose()
+            }
+        } finally {
+            $aes.Dispose()
+        }
+    } finally {
+        $inStream.Dispose()
+    }
+}
+
+function Read-InstallPassword {
+    # 自動化・検証用の抜け道。通常の利用者は対話入力になる。
+    if (-not [string]::IsNullOrEmpty($env:LEELAB_PASSWORD)) { return $env:LEELAB_PASSWORD }
+
+    $secure = Read-Host '  Password' -AsSecureString
+    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try {
+        return [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    } finally {
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+}
+
+function Unlock-Package {
+    param(
+        [string] $EncPath,
+        [string] $ZipPath,
+        [string] $ExpectedSha256,
+        [int] $Iterations,
+        [string] $DisplayName
+    )
+    Write-Host ''
+    Write-Host "  $DisplayName has not been released publicly yet." -ForegroundColor White
+    Write-Host '  Please enter the password you received from the developer.' -ForegroundColor White
+    Write-Host ''
+
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $password = Read-InstallPassword
+        $ok = $false
+        try {
+            Unprotect-OpenSslFile -InPath $EncPath -OutPath $ZipPath `
+                -Password $password -Iterations $Iterations
+            # パスワードが違うとパディング検証で例外になるのが通常だが、
+            # まれに例外にならずに壊れたデータが出てくる。ハッシュで最終確認する。
+            $ok = Test-FileHash $ZipPath $ExpectedSha256
+        } catch {
+            $ok = $false
+        } finally {
+            $password = $null
+        }
+
+        if ($ok) {
+            Write-Ok 'Password accepted'
+            return
+        }
+
+        Remove-Item -Force $ZipPath -ErrorAction SilentlyContinue
+        if ($attempt -lt 3) {
+            Write-Warn "Incorrect password. Please try again. ($(3 - $attempt) attempt(s) left)"
+            if (-not [string]::IsNullOrEmpty($env:LEELAB_PASSWORD)) {
+                # 環境変数で渡された値が誤っている場合、繰り返しても結果は変わらない。
+                break
+            }
+        }
+    }
+    Fail "Installation cancelled because the password was not correct.`n         If you do not know the password, please contact the developer."
 }
 
 # ---------------------------------------------------------------------------
@@ -191,7 +319,7 @@ function Install-Uv {
     # すでに PATH にあればそれを使う。
     $existing = Get-Command uv -ErrorAction SilentlyContinue
     if ($existing) {
-        Write-Ok "uv は導入済み ($($existing.Source))"
+        Write-Ok "uv is already installed ($($existing.Source))"
         return $existing.Source
     }
 
@@ -200,11 +328,11 @@ function Install-Uv {
     $uvExe  = Join-Path $uvHome 'uv.exe'
     if (Test-Path $uvExe) {
         $env:Path = "$uvHome;$env:Path"
-        Write-Ok 'uv は導入済み'
+        Write-Ok 'uv is already installed'
         return $uvExe
     }
 
-    Write-Step 'uv (Python 環境管理ツール) を導入中...'
+    Write-Step 'Installing uv (a Python environment manager)...'
     $scriptPath = Join-Path ([System.IO.Path]::GetTempPath()) 'leelab-uv-install.ps1'
     try {
         $content = (Invoke-WebRequest -Uri $UvInstallerUrl -UseBasicParsing).Content
@@ -223,19 +351,19 @@ function Install-Uv {
         $log = Invoke-Native 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath)
         if ($LASTEXITCODE -ne 0) {
             $log | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
-            Fail 'uv の導入に失敗しました。'
+            Fail 'Failed to install uv.'
         }
     } catch {
-        Fail "uv の導入に失敗しました。`n         詳細: $($_.Exception.Message)"
+        Fail "Failed to install uv.`n         Details: $($_.Exception.Message)"
     } finally {
         Remove-Item -Force $scriptPath -ErrorAction SilentlyContinue
     }
 
     if (-not (Test-Path $uvExe)) {
-        Fail 'uv の導入に失敗しました（実行ファイルが見つかりません）。'
+        Fail 'Failed to install uv (the executable was not found).'
     }
     $env:Path = "$uvHome;$env:Path"
-    Write-Ok 'uv を導入しました'
+    Write-Ok 'Installed uv'
     return $uvExe
 }
 
@@ -300,20 +428,20 @@ function New-Shortcut {
 
 function Select-Tool($Index) {
     $tools = @(Get-Prop $Index 'tools' @())
-    if ($tools.Count -eq 0) { Fail '配布可能なツールがありません。' }
+    if ($tools.Count -eq 0) { Fail 'No tools are available for installation.' }
 
     if (-not [string]::IsNullOrWhiteSpace($Tool)) {
         $match = $tools | Where-Object { $_.name -eq $Tool }
         if (-not $match) {
             $names = ($tools | ForEach-Object { $_.name }) -join ', '
-            Fail "'$Tool' というツールはありません。利用できるのは: $names"
+            Fail "There is no tool named '$Tool'. Available tools: $names"
         }
         return @($match)[0]
     }
 
     if ($tools.Count -eq 1) { return $tools[0] }
 
-    Write-Head 'インストールするツールを選んでください'
+    Write-Head 'Select the tool you want to install'
     for ($i = 0; $i -lt $tools.Count; $i++) {
         $t = $tools[$i]
         Write-Host ("    [{0}] {1}" -f ($i + 1), $t.display_name) -ForegroundColor White
@@ -321,13 +449,13 @@ function Select-Tool($Index) {
     }
     Write-Host ''
     while ($true) {
-        $answer = Read-Host '  番号を入力して Enter (中止する場合は q)'
-        if ($answer -eq 'q') { Write-Host ''; Write-Host '  中止しました。'; exit 0 }
+        $answer = Read-Host '  Enter a number and press Enter (or q to quit)'
+        if ($answer -eq 'q') { Write-Host ''; Write-Host '  Cancelled.'; exit 0 }
         $n = 0
         if ([int]::TryParse($answer, [ref] $n) -and $n -ge 1 -and $n -le $tools.Count) {
             return $tools[$n - 1]
         }
-        Write-Warn ('1 から {0} の番号を入力してください。' -f $tools.Count)
+        Write-Warn ('Please enter a number between 1 and {0}.' -f $tools.Count)
     }
 }
 
@@ -384,7 +512,7 @@ function Save-UserData([string] $AppDir, [string[]] $Paths) {
         Remove-Item -Recurse -Force $backup -ErrorAction SilentlyContinue
         return $null
     }
-    Write-Ok "設定とキャッシュを退避しました ($saved 件)"
+    Write-Ok "Saved your settings and cached data ($saved item(s))"
     return $backup
 }
 
@@ -395,7 +523,7 @@ function Restore-UserData([string] $Backup, [string] $AppDir) {
         Get-ChildItem -Force $Backup | ForEach-Object {
             Copy-Item -Recurse -Force -Path $_.FullName -Destination $AppDir
         }
-        Write-Ok '設定とキャッシュを復元しました'
+        Write-Ok 'Restored your settings and cached data'
     } finally {
         Remove-Item -Recurse -Force $Backup -ErrorAction SilentlyContinue
     }
@@ -447,10 +575,11 @@ function Write-UninstallScript {
     )
     $shortcutList = ($ShortcutPaths | ForEach-Object { "    '" + $_.Replace("'", "''") + "'" }) -join ",`n"
     $content = @"
-# $DisplayName をアンインストールします。
-# このファイルはインストーラが自動生成しました。
+# Uninstalls $DisplayName.
+# This file was generated automatically by the installer.
 #
-# Windows の「設定 > アプリ」から実行されるほか、確認を省いて実行することもできます。
+# It is run from Windows "Settings > Apps", and can also be run without a
+# confirmation prompt:
 #     powershell -ExecutionPolicy Bypass -File uninstall.ps1 -Yes
 param([switch] `$Yes)
 
@@ -462,13 +591,13 @@ $shortcutList
 )
 
 Write-Host ''
-Write-Host '  $DisplayName をアンインストールします。'
-Write-Host "  削除先: `$toolRoot"
+Write-Host '  Uninstalling $DisplayName.'
+Write-Host "  Location: `$toolRoot"
 Write-Host ''
 if (-not `$Yes) {
-    `$answer = Read-Host '  よろしいですか? (y/N)'
+    `$answer = Read-Host '  Are you sure? (y/N)'
     if (`$answer -ne 'y' -and `$answer -ne 'Y') {
-        Write-Host '  中止しました。'
+        Write-Host '  Cancelled.'
         exit 0
     }
 }
@@ -485,7 +614,7 @@ Start-Process -WindowStyle Hidden powershell.exe -ArgumentList @(
 )
 
 Write-Host ''
-Write-Host '  アンインストールしました。'
+Write-Host '  Uninstalled.'
 Write-Host ''
 "@
     $path = Join-Path $ToolRoot 'uninstall.ps1'
@@ -506,10 +635,10 @@ function Install-Tool($Entry) {
     $displayName = Get-Prop $m 'display_name' $name
     $version     = Get-Prop $m 'version' '0.0.0'
     $pkg         = Get-Prop $m 'package'
-    if ($null -eq $pkg) { Fail "$displayName の配布情報が未整備です（package が未設定）。" }
+    if ($null -eq $pkg) { Fail "The distribution info for $displayName is incomplete (no package section)." }
     $pkgUrl = Get-Prop $pkg 'url' ''
     if ([string]::IsNullOrWhiteSpace($pkgUrl)) {
-        Fail "$displayName はまだリリースされていません。開発者に連絡してください。"
+        Fail "$displayName has not been released yet. Please contact the developer."
     }
 
     $toolRoot = Join-Path $InstallRoot $name
@@ -523,53 +652,67 @@ function Install-Tool($Entry) {
         try { $installed = Get-Content -Raw $stateFile | ConvertFrom-Json } catch { $installed = $null }
     }
     if ($null -ne $installed) {
-        $installedVersion = Get-Prop $installed 'version' '不明'
-        Write-Head "$displayName は既にインストールされています (バージョン $installedVersion)"
+        $installedVersion = Get-Prop $installed 'version' 'unknown'
+        Write-Head "$displayName is already installed (version $installedVersion)"
         if ($installedVersion -eq $version) {
-            Write-Host "  配布中の最新版と同じバージョンです。" -ForegroundColor DarkGray
+            Write-Host "  This is the same as the latest available version." -ForegroundColor DarkGray
         } else {
-            Write-Host "  新しいバージョン $version が利用できます。" -ForegroundColor White
+            Write-Host "  A newer version, $version, is available." -ForegroundColor White
         }
         if (-not $Quiet) {
             Write-Host ''
-            $answer = Read-Host '  再インストール / 更新しますか? (Y/n)'
+            $answer = Read-Host '  Reinstall / update now? (Y/n)'
             if ($answer -eq 'n' -or $answer -eq 'N') {
-                Write-Host ''; Write-Host '  中止しました。'; exit 0
+                Write-Host ''; Write-Host '  Cancelled.'; exit 0
             }
         }
     }
 
-    Write-Head "$displayName $version をインストールします"
-    Write-Host "  インストール先: $toolRoot" -ForegroundColor DarkGray
+    Write-Head "Installing $displayName $version"
+    Write-Host "  Install location: $toolRoot" -ForegroundColor DarkGray
     Write-Host ''
 
     # --- uv と Python ------------------------------------------------------
     $uv = Install-Uv
 
     $python = Get-Prop $m 'python' '3.12'
-    Write-Step "Python $python を用意中..."
+    Write-Step "Preparing Python $python..."
     Invoke-Uv $uv @('python', 'install', $python) `
-        "Python $python の導入に失敗しました。"
-    Write-Ok "Python $python を用意しました"
+        "Failed to install Python $python."
+    Write-Ok "Python $python is ready"
 
     # --- 本体の取得 --------------------------------------------------------
     $work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
     New-Item -ItemType Directory -Force -Path $work | Out-Null
 
     try {
-        Write-Step "$displayName 本体をダウンロード中..."
+        Write-Step "Downloading $displayName..."
+        $expectedSha = Get-Prop $pkg 'sha256' ''
+        $isEncrypted = [bool] (Get-Prop $pkg 'encrypted' $false)
         $zipPath = Join-Path $work 'package.zip'
-        Save-RemoteFile $pkgUrl $zipPath (Get-Prop $pkg 'sha256' '')
-        Write-Ok '本体を取得しました'
+
+        if ($isEncrypted) {
+            # 暗号化されている場合、マニフェストのハッシュは復号後の zip のもの。
+            # ダウンロード直後には照合できないため、復号のあとで検証する。
+            $encPath = Join-Path $work 'package.enc'
+            Save-RemoteFile $pkgUrl $encPath
+            Write-Ok 'Download complete'
+            Unlock-Package -EncPath $encPath -ZipPath $zipPath -ExpectedSha256 $expectedSha `
+                -Iterations ([int] (Get-Prop $pkg 'kdf_iterations' 200000)) -DisplayName $displayName
+            Remove-Item -Force $encPath -ErrorAction SilentlyContinue
+        } else {
+            Save-RemoteFile $pkgUrl $zipPath $expectedSha
+            Write-Ok 'Download complete'
+        }
 
         # 更新の場合、設定・キャッシュを退避してから展開する。
         $preserve = @(Get-Prop $m 'preserve' @())
         $backup = Save-UserData $appDir $preserve
 
-        Write-Step 'ファイルを展開中...'
+        Write-Step 'Extracting files...'
         Expand-Package $zipPath $appDir
         Restore-UserData $backup $appDir
-        Write-Ok '展開しました'
+        Write-Ok 'Extracted'
 
         # --- 依存パッケージ -------------------------------------------------
         # PyPI に無い wheel（PyOgg 0.7 など）を先に取得し、--find-links で参照させる。
@@ -580,30 +723,30 @@ function Install-Tool($Entry) {
             $fileName = Split-Path -Leaf $w
             Save-RemoteFile "$BaseUrl/$w" (Join-Path $wheelDir $fileName)
         }
-        if ($wheels.Count -gt 0) { Write-Ok "同梱 wheel を取得しました ($($wheels.Count) 件)" }
+        if ($wheels.Count -gt 0) { Write-Ok "Fetched bundled components ($($wheels.Count) item(s))" }
 
-        Write-Step '仮想環境を作成中...'
+        Write-Step 'Creating an isolated Python environment...'
         # --clear が無いと、更新時に「既に存在する」で失敗する。
         # 作り直すことで、旧バージョンで使っていて今は不要になったパッケージが
         # 残り続けるのも防げる。uv はダウンロード済みの wheel をキャッシュから
         # 再利用するため、再作成でも通信は発生しない。
-        Invoke-Uv $uv @('venv', '--clear', '--python', $python, $venvDir) '仮想環境の作成に失敗しました。'
+        Invoke-Uv $uv @('venv', '--clear', '--python', $python, $venvDir) 'Failed to create the Python environment.'
 
         $venvPython = Join-Path $venvDir 'Scripts\python.exe'
-        if (-not (Test-Path $venvPython)) { Fail '仮想環境の作成に失敗しました。' }
+        if (-not (Test-Path $venvPython)) { Fail 'Failed to create the Python environment.' }
 
         $reqName = Get-Prop $m 'requirements' 'requirements.txt'
         $reqPath = Join-Path $appDir $reqName
-        if (-not (Test-Path $reqPath)) { Fail "$reqName が配布物に含まれていません。" }
+        if (-not (Test-Path $reqPath)) { Fail "$reqName is missing from the package." }
 
-        Write-Step '依存パッケージを導入中... (数分かかります。そのままお待ちください)'
+        Write-Step 'Installing required components... (this takes a few minutes, please wait)'
         Invoke-Uv $uv @(
             'pip', 'install',
             '--python', $venvPython,
             '-r', $reqPath,
             '--find-links', $wheelDir
-        ) '依存パッケージの導入に失敗しました。'
-        Write-Ok '依存パッケージを導入しました'
+        ) 'Failed to install the required components.'
+        Write-Ok 'Required components installed'
 
     } finally {
         Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
@@ -643,13 +786,13 @@ function Install-Tool($Entry) {
     }
     if ($wantConsole) {
         # 不具合調査用。コンソールを表示したまま起動し、エラーメッセージを読めるようにする。
-        $p = Join-Path $startMenuDir "$displayName (診断モード).lnk"
+        $p = Join-Path $startMenuDir "$displayName (Diagnostic Mode).lnk"
         New-Shortcut -Path $p -Target $venvPython -Arguments $entryScript `
             -WorkingDirectory $appDir -IconPath $iconPath `
-            -Description "$displayName をコンソール表示付きで起動します（不具合調査用）"
+            -Description "Starts $displayName with a console window so error messages are visible"
         [void] $createdShortcuts.Add($p)
     }
-    Write-Ok "ショートカットを作成しました ($($createdShortcuts.Count) 件)"
+    Write-Ok "Created shortcuts ($($createdShortcuts.Count) item(s))"
 
     # --- 状態の記録 --------------------------------------------------------
     $state = [ordered] @{
@@ -671,23 +814,23 @@ function Install-Tool($Entry) {
 
     # --- 完了 --------------------------------------------------------------
     Write-Host ''
-    Write-Host "  $displayName $version のインストールが完了しました。" -ForegroundColor Green
+    Write-Host "  $displayName $version was installed successfully." -ForegroundColor Green
     Write-Host ''
     if ($wantDesktop) {
-        Write-Host "  デスクトップの「$displayName」アイコンから起動できます。" -ForegroundColor White
+        Write-Host "  You can start it from the `"$displayName`" icon on your desktop." -ForegroundColor White
     } else {
-        Write-Host "  スタートメニューの $Publisher > $displayName から起動できます。" -ForegroundColor White
+        Write-Host "  You can start it from the Start menu: $Publisher > $displayName." -ForegroundColor White
     }
 
     $notes = @(Get-Prop $m 'notes' @())
     if ($notes.Count -gt 0) {
         Write-Host ''
-        foreach ($n in $notes) { Write-Host "  ・$n" -ForegroundColor DarkGray }
+        foreach ($n in $notes) { Write-Host "  - $n" -ForegroundColor DarkGray }
     }
 
     Write-Host ''
-    Write-Host '  更新するときは、同じコマンドをもう一度実行してください。' -ForegroundColor DarkGray
-    Write-Host '  アンインストールは Windows の「設定 > アプリ」から行えます。' -ForegroundColor DarkGray
+    Write-Host '  To update later, just run the same command again.' -ForegroundColor DarkGray
+    Write-Host '  To uninstall, use Windows Settings > Apps.' -ForegroundColor DarkGray
     Write-Host ''
 }
 
@@ -697,7 +840,7 @@ function Install-Tool($Entry) {
 
 Write-Host ''
 Write-Host '  ============================================' -ForegroundColor Cyan
-Write-Host '   Lee Lab ツールインストーラ' -ForegroundColor Cyan
+Write-Host '   Lee Lab Tool Installer' -ForegroundColor Cyan
 Write-Host '  ============================================' -ForegroundColor Cyan
 
 Test-Environment

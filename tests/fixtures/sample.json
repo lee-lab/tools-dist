@@ -1,0 +1,7 @@
+{
+  "_comment": "openssl と .NET の相互運用を検証するための固定データ。sample.enc は次のコマンドで生成した: openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -salt -pass pass:test-password-1234",
+  "password": "test-password-1234",
+  "kdf_iterations": 200000,
+  "plaintext_sha256": "b6d1087a214a34ab79eeeab08a5b44f55d94dd500bbc59929d983532f7e332a1",
+  "plaintext_size": 118
+}

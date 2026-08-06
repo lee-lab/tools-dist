@@ -1,85 +1,97 @@
-# Lee Lab ツール配布
+# Lee Lab Tools
 
-研究室で開発しているツールを Windows へ簡単に導入するための配布リポジトリです。
+Easy installation of Lee Lab tools on Windows.
 
-利用者は **Python をインストールする必要はありません**。インストーラが必要なものをすべて自動で用意します。
+**You do not need to install Python.** The installer sets up everything for you.
 
 ---
 
-## インストール方法
+## Installing
 
-1. スタートメニューで `PowerShell` と入力し、**Windows PowerShell** を起動します（管理者権限は不要です）。
-2. 次の 1 行をコピーして貼り付け、Enter を押します。
+1. Type `PowerShell` into the Start menu and open **Windows PowerShell**. Administrator rights are not required.
+2. Copy the line below, paste it in, and press Enter.
 
 ```powershell
 irm https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.ps1 | iex
 ```
 
-3. 画面の指示に従ってツールを選びます。
-4. 完了すると、デスクトップに起動用のアイコンができます。
+3. Follow the on-screen prompts to pick a tool.
+4. **If you are asked for a password**, enter the one you received from the developer (see below).
+5. When it finishes, a shortcut is placed on your desktop.
 
-インストールには数分かかります。途中で閉じずにお待ちください。
+Installation takes a few minutes. Please leave the window open until it completes.
 
-### 必要なディスク容量
+### About the password
 
-Valles の場合、およそ **4.5GB** を使用します。内訳は次のとおりです。
+Tools that have not been released publicly yet are distributed in encrypted form. You will be asked for a password once during installation. Enter the password you received from the developer.
 
-| 用途 | 容量 | 備考 |
+- The password is **required every time you update**, so keep a note of it.
+- If it will not accept your password, it may be incorrect, or it may have changed with a newer release. Please check with the developer.
+- Do not share the password with anyone outside the project.
+
+### Disk space
+
+Valles needs roughly **4.5 GB**:
+
+| What | Size | Notes |
 |---|---|---|
-| アプリ本体と実行環境 | 約 2.2GB | ツールごとに必要 |
-| ダウンロードの控え | 約 2.2GB | **全ツールで共有**。更新を速くするために保持されます |
+| The app and its runtime | ~2.2 GB | Needed per tool |
+| Cached downloads | ~2.2 GB | **Shared by all tools.** Kept so that updates are fast |
 
-2 つ目のツールを入れるときは、共有部分が再利用されるため必要な容量は少なくて済みます。更新も、この控えのおかげで十数秒で完了します。
+Installing a second tool needs much less space, because the shared part is reused. The cache is also why updates finish in a few seconds.
 
-ディスクの空きが厳しい場合、次のコマンドで控えを削除できます（次回の更新が遅くなるだけで、動作には影響しません）。
+If you are short on disk space, you can delete the cache. This only makes the next update slower; nothing stops working.
 
 ```powershell
 & "$env:USERPROFILE\.local\bin\uv.exe" cache clean
 ```
 
-### 更新のしかた
+### Updating
 
-**同じコマンドをもう一度実行してください。** 新しいバージョンがあれば更新されます。設定内容やダウンロード済みのモデルはそのまま引き継がれます。
+**Run the same command again.** If a newer version exists, it is installed. Your settings and any downloaded model files are carried over.
 
-### アンインストールのしかた
+### Uninstalling
 
-Windows の **設定 > アプリ > インストールされているアプリ** の一覧から、ツール名を選んでアンインストールしてください。
+Open Windows **Settings > Apps > Installed apps**, find the tool by name, and uninstall it.
 
 ---
 
-## 配布中のツール
+## Available tools
 
-| ツール | 説明 |
+| Tool | Description |
 |---|---|
-| [Valles](https://github.com/lee-lab/valles) | MMDAgent-EX のための遠隔操作アプリケーション |
+| [Valles](https://github.com/lee-lab/valles) | Remote control application for MMDAgent-EX |
 
 ---
 
-## 困ったときは
+## Troubleshooting
 
-**「このシステムではスクリプトの実行が無効になっているため…」と出る**
+**"running scripts is disabled on this system"**
 
-上記のコマンドは `irm ... | iex` の形式なので、通常この制限を受けません。それでも出る場合は、PowerShell で次を実行してから、もう一度お試しください。
+The command above uses the `irm ... | iex` form, which is normally not affected by this restriction. If you still see it, run the following and then try again:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-**アプリが起動しない / 起動してすぐ消える**
+**The app does not start, or the window disappears immediately**
 
-スタートメニューの `Lee Lab` フォルダにある **「（ツール名）(診断モード)」** から起動してください。黒い画面にエラー内容が表示されるので、その内容を開発者にお知らせください。
+Start it from **"(tool name) (Diagnostic Mode)"** in the `Lee Lab` folder of your Start menu. A console window will show the error message. Please send that message to the developer.
 
-**インストールが途中で止まる**
+**Installation stops partway through**
 
-社内ネットワークのプロキシや、ウイルス対策ソフトが通信を遮断している可能性があります。エラーメッセージをそのままコピーして開発者にご連絡ください。
+A proxy on your network or antivirus software may be blocking the connection. Please copy the error message and send it to the developer.
 
-**64bit 版の Windows が必要です、と出る**
+**"64-bit Windows is required"**
 
-このツール群は 64bit 版 Windows 10 / 11 専用です。ARM 版 Windows には対応していません。
+These tools run only on 64-bit Windows 10 / 11. Windows on ARM is not supported.
 
 ---
 
-## 開発者向け
+## 開発者向け（日本語）
+
+> 以下は開発・運用担当者向けの記述です。利用者向けの案内は上記の英語部分を参照してください。
+> インストーラが利用者に表示するメッセージは、英語話者の利用者がいるため**すべて英語**にしています。追加・変更するときも英語で書いてください。
 
 ### リポジトリの構成
 
@@ -140,6 +152,27 @@ gh secret set TOOLS_DIST_TOKEN --repo lee-lab/<tool>
 ```
 
 トークンには有効期限があり、切れるとリリースワークフローが 403 で失敗します。エラーの見た目が権限設定の誤りと区別しづらいため、期限を長めに設定するか、期限日を記録しておいてください。
+
+### 配布物の暗号化（一般公開前のツール）
+
+一般公開前のツールは、配布物を暗号化した状態で Releases に置きます。このリポジトリは公開されているため、暗号化しないと誰でも取得できてしまうためです。
+
+- 形式は OpenSSL の `enc -aes-256-cbc -pbkdf2 -md sha256 -salt` と同じ
+- 暗号化はリリースワークフローが行い、パスワードはツール側リポジトリの `PAYLOAD_PASSWORD` シークレットから読む
+- マニフェストの `sha256` は**復号後**の zip のもの。インストーラは復号結果をこれと照合するため、パスワード誤りを確実に検出できる
+- 反復回数はマニフェストの `kdf_iterations` に記録される。将来引き上げても、既にインストール済みの利用者に影響はない
+
+```shell
+gh secret set PAYLOAD_PASSWORD --repo lee-lab/<tool>
+```
+
+> **この暗号化が守るもの・守らないもの**
+>
+> 守るのは「配布物を偶然拾った第三者が中身を取り出すこと」です。パスワードを知る利用者による再配布は防げませんし、インストール後はソースが平文でディスク上に置かれます。access control ではなく、意図しない取得を防ぐための措置と理解してください。
+
+#### 一般公開に切り替えるとき
+
+ツール側リポジトリの `PAYLOAD_PASSWORD` シークレットを**削除**し、次のリリースを行うだけです。ワークフローは暗号化を行わず、マニフェストからも `encrypted` が外れます。インストーラはパスワードを尋ねなくなります。
 
 ### PyOgg の wheel を再ビルドする
 

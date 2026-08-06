@@ -176,6 +176,85 @@ $ue2 = $null
 [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $toolRoot2 'uninstall.ps1'), [ref]$null, [ref]$ue2) | Out-Null
 Check 'no shortcuts -> still valid' ($ue2.Count -eq 0)
 
+# --- Unprotect-OpenSslFile --------------------------------------------------
+# 配布物の暗号化は CI 側 (openssl) とインストーラ側 (.NET) で別実装になるため、
+# 両者が食い違うと「誰も開けない配布物」が出来上がる。固定データで互換性を守る。
+Write-Host ''
+Write-Host 'Unprotect-OpenSslFile (openssl との相互運用)' -ForegroundColor Yellow
+
+$fixtureDir = Join-Path $PSScriptRoot 'fixtures'
+if (-not (Test-Path $fixtureDir)) { $fixtureDir = Join-Path (Split-Path -Parent $InstallerPath) 'fixtures' }
+$fx = Get-Content -Raw (Join-Path $fixtureDir 'sample.json') | ConvertFrom-Json
+$encFile = Join-Path $fixtureDir 'sample.enc'
+$decFile = Join-Path $sandbox 'decrypted.txt'
+
+Unprotect-OpenSslFile -InPath $encFile -OutPath $decFile `
+    -Password $fx.password -Iterations $fx.kdf_iterations
+$decHash = (Get-FileHash -Path $decFile -Algorithm SHA256).Hash.ToLowerInvariant()
+Check 'correct password decrypts'  ($decHash -eq $fx.plaintext_sha256) "got $decHash"
+Check 'decrypted size matches'     ((Get-Item $decFile).Length -eq $fx.plaintext_size)
+
+# 誤ったパスワードは、パディング検証の例外か、ハッシュ不一致で検出できること
+$wrongDetected = $false
+try {
+    Unprotect-OpenSslFile -InPath $encFile -OutPath (Join-Path $sandbox 'wrong.txt') `
+        -Password 'not-the-password' -Iterations $fx.kdf_iterations
+    $h = (Get-FileHash -Path (Join-Path $sandbox 'wrong.txt') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $wrongDetected = ($h -ne $fx.plaintext_sha256)
+} catch { $wrongDetected = $true }
+Check 'wrong password detected' $wrongDetected
+
+# 反復回数が食い違っても検出できること（マニフェストと CI の設定ずれ）
+$iterDetected = $false
+try {
+    Unprotect-OpenSslFile -InPath $encFile -OutPath (Join-Path $sandbox 'iter.txt') `
+        -Password $fx.password -Iterations 100000
+    $h = (Get-FileHash -Path (Join-Path $sandbox 'iter.txt') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $iterDetected = ($h -ne $fx.plaintext_sha256)
+} catch { $iterDetected = $true }
+Check 'iteration mismatch detected' $iterDetected
+
+# 暗号化されていないファイルを渡された場合
+$plainFile = Join-Path $sandbox 'notencrypted.bin'
+Set-Content -Path $plainFile -Value 'this is not an openssl container at all'
+$magicDetected = $false
+try {
+    Unprotect-OpenSslFile -InPath $plainFile -OutPath (Join-Path $sandbox 'x.bin') `
+        -Password 'whatever' -Iterations $fx.kdf_iterations
+} catch { $magicDetected = $true }
+Check 'non-encrypted input rejected' $magicDetected
+
+# --- Unlock-Package ---------------------------------------------------------
+Write-Host ''
+Write-Host 'Unlock-Package' -ForegroundColor Yellow
+
+$unlocked = Join-Path $sandbox 'unlocked.txt'
+$env:LEELAB_PASSWORD = $fx.password
+Unlock-Package -EncPath $encFile -ZipPath $unlocked -ExpectedSha256 $fx.plaintext_sha256 `
+    -Iterations $fx.kdf_iterations -DisplayName 'Test'
+Check 'unlock with correct password' (Test-Path $unlocked)
+Check 'unlocked content matches' `
+    ((Get-FileHash -Path $unlocked -Algorithm SHA256).Hash.ToLowerInvariant() -eq $fx.plaintext_sha256)
+
+# 誤ったパスワードでは Fail が呼ばれて終了する。Fail は exit するため、
+# ここでは別プロセスに実行させて終了コードを確認する。
+$env:LEELAB_PASSWORD = 'definitely-wrong'
+$probe = @"
+`$ErrorActionPreference = 'Stop'
+`$ast = [System.Management.Automation.Language.Parser]::ParseFile('$InstallerPath', [ref]`$null, [ref]`$null)
+foreach (`$f in `$ast.FindAll({ param(`$n) `$n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, `$false)) {
+    Invoke-Expression `$f.Extent.Text
+}
+Unlock-Package -EncPath '$encFile' -ZipPath '$(Join-Path $sandbox "fail.txt")' ``
+    -ExpectedSha256 '$($fx.plaintext_sha256)' -Iterations $($fx.kdf_iterations) -DisplayName 'Test'
+"@
+$probeFile = Join-Path $sandbox 'probe.ps1'
+[System.IO.File]::WriteAllText($probeFile, $probe, (New-Object System.Text.UTF8Encoding($true)))
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $probeFile | Out-Null
+Check 'wrong password exits with error' ($LASTEXITCODE -ne 0)
+Check 'no output file left behind'      (-not (Test-Path (Join-Path $sandbox 'fail.txt')))
+Remove-Item Env:\LEELAB_PASSWORD -ErrorAction SilentlyContinue
+
 # --- Select-Tool ------------------------------------------------------------
 Write-Host ''
 Write-Host 'Select-Tool' -ForegroundColor Yellow

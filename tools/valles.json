@@ -2,7 +2,7 @@
   "schema": 1,
   "name": "valles",
   "display_name": "Valles",
-  "description": "MMDAgent-EX のための遠隔操作アプリケーション",
+  "description": "Remote control application for MMDAgent-EX",
   "version": "0.0.0",
   "python": "3.12",
   "package": {
@@ -27,7 +27,7 @@
     "console_variant": true
   },
   "notes": [
-    "初回起動時、接続先の設定を行ってください。",
-    "Speech2Motion を初めて使うときは、モデルファイル (約 120MB) が自動でダウンロードされます。"
+    "On first launch, please configure the connection settings.",
+    "The first time you use Speech2Motion, a model file (about 120 MB) is downloaded automatically."
   ]
 }

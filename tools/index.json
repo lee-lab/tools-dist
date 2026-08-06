@@ -4,7 +4,7 @@
     {
       "name": "valles",
       "display_name": "Valles",
-      "description": "MMDAgent-EX のための遠隔操作アプリケーション",
+      "description": "Remote control application for MMDAgent-EX",
       "manifest": "tools/valles.json"
     }
   ]
