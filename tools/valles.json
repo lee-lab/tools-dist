@@ -11,11 +11,15 @@
     "encrypted": true,
     "kdf_iterations": 200000
   },
+  "requirements_hashed": [
+    "requirements-pywebrtc.txt"
+  ],
   "requirements": "requirements.txt",
   "entry": "main.py",
   "icon": "valles.ico",
   "wheels": [
-    "wheels/PyOgg-0.7-py2.py3-none-win_amd64.whl"
+    "wheels/PyOgg-0.7-py2.py3-none-win_amd64.whl",
+    "wheels/pywebrtc-audio-0.1.0/pywebrtc_audio-0.1.0-cp312-cp312-win_amd64.whl"
   ],
   "preserve": [
     "settings.json",
