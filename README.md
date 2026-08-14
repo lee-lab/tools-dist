@@ -44,8 +44,8 @@ tools-dist/
 ├── tools/
 │   ├── index.json     配布中のツール一覧（インストーラのメニューの元）
 │   └── <tool>.json    ツールごとのマニフェスト
-├── wheels/            PyPI に無いビルド済み wheel
-├── scripts/           wheel のビルドなど、メンテナンス用スクリプト
+├── wheels/            PyPI に無い wheel と、監査済み成果物のミラー
+├── scripts/           wheel のビルド・ミラーなど、メンテナンス用スクリプト
 ├── tests/             インストーラのテスト（実行しても何もインストールされない）
 └── docs/              各種ドキュメント
 ```
