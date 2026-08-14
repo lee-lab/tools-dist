@@ -732,7 +732,10 @@ function Install-Tool($Entry) {
         Write-Ok 'Extracted'
 
         # --- Dependencies ---------------------------------------------------
-        # Fetch wheels that are not on PyPI (PyOgg 0.7) and point pip at them.
+        # Fetch the wheels this repository supplies and point pip at them. Two
+        # kinds live there: packages PyPI does not carry at all (PyOgg 0.7), and
+        # mirrors of audited artifacts, so that a hash-pinned install below can
+        # be satisfied even if the upstream project disappears.
         $wheelDir = Join-Path $work 'wheels'
         New-Item -ItemType Directory -Force -Path $wheelDir | Out-Null
         $wheels = @(Get-Prop $m 'wheels' @())
@@ -755,6 +758,40 @@ function Install-Tool($Entry) {
         $reqName = Get-Prop $m 'requirements' 'requirements.txt'
         $reqPath = Join-Path $appDir $reqName
         if (-not (Test-Path $reqPath)) { Fail "$reqName is missing from the package." }
+
+        # Hash-pinned requirement files, installed BEFORE the main one. A tool
+        # ships one for a dependency whose exact artifact was audited (Valles
+        # does for pywebrtc-audio, lee-lab/valles#67): both pip and uv verify
+        # hashes per FILE and all-or-nothing, so an audited pin cannot just be
+        # annotated inside requirements.txt -- everything else there would then
+        # need a hash too, and some of it cannot supply one (PyOgg comes from
+        # the wheel link below). It has to live in a file of its own.
+        #
+        # The ORDER is what makes the verification real. The same pin is
+        # repeated in the main requirements.txt so that a plain developer
+        # install works without this step, and a requirement that is already
+        # satisfied is never verified again -- run the main file first and the
+        # hash check silently passes over an unverified package.
+        #
+        # --no-deps because hash mode demands a hash for every package it would
+        # install, dependencies included; those belong to the main file.
+        $hashedReqs = @(Get-Prop $m 'requirements_hashed' @())
+        foreach ($hashedReq in $hashedReqs) {
+            $hashedPath = Join-Path $appDir $hashedReq
+            if (-not (Test-Path $hashedPath)) {
+                Fail "$hashedReq is missing from the package. Please contact the developer."
+            }
+            Write-Step "Checking a verified component ($hashedReq)..."
+            Invoke-Uv $uv @(
+                'pip', 'install',
+                '--python', $venvPython,
+                '--no-deps',
+                '--require-hashes',
+                '-r', $hashedPath,
+                '--find-links', $wheelDir
+            ) "A component did not match its expected contents ($hashedReq). Please contact the developer."
+            Write-Ok "Verified $hashedReq"
+        }
 
         Write-Step 'Installing required components... (this takes a few minutes, please wait)'
         Invoke-Uv $uv @(

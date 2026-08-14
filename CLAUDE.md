@@ -70,9 +70,19 @@
 
 ## wheels/
 
-- PyPI に無いパッケージのビルド済み wheel を置く場所
-- 追加・更新するときは、再現できるビルドスクリプトを `scripts/` に必ず添えること
-- 現在: `PyOgg 0.7`（PyPI 版 0.6.14a1 には `OpusEncoder` / `OpusDecoder` が無いため）
+- PyPI に無いパッケージの wheel と、監査済み成果物のミラーを置く場所
+- 追加・更新するときは、**再現できるスクリプトを `scripts/` に必ず添えること**。自前ビルドならビルドスクリプト、ミラーなら再取得・照合スクリプト（ミラーで置き換えてはいけない: 成果物そのものを置くことに意味がある）
+- 現在:
+  - `PyOgg 0.7`（PyPI 版 0.6.14a1 には `OpusEncoder` / `OpusDecoder` が無いため）→ `scripts/build-pyogg-wheel.sh`
+  - `pywebrtc-audio 0.1.0` 全成果物（valles#67 の音声処理コアの依存退避、上流は新興プロジェクト）→ `scripts/mirror-pywebrtc-audio.sh`
+
+## requirements_hashed（マニフェストの任意項目）
+
+監査済み依存をダイジェストで縛るための仕組み。`--no-deps --require-hashes` で、**本体の `requirements.txt` より先に**インストールする。
+
+- **順序を入れ替えてはいけない。** 同じピンは `requirements.txt` にも書かれており（開発者の素の install を動かすため）、既に入っている要求に pip / uv は何も検証しない。本体を先に流すと検証が一度も走らない
+- 指定ファイルが配布物に無ければ**失敗させる**（黙って飛ばすと「検証したつもり」の環境ができる）
+- どちらも `tests/test-install-flow.ps1` が守っている。この 2 つの assertion を消さないこと
 
 ## 検証
 

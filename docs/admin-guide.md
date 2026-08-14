@@ -96,7 +96,8 @@
    | `entry` | 起動するスクリプト |
    | `icon` | `.ico` のファイル名 |
    | `preserve` | **更新時に引き継ぐファイル・フォルダ**（後述） |
-   | `wheels` | PyPI に無く、tools-dist から供給する wheel |
+   | `wheels` | tools-dist から供給する wheel（PyPI に無いもの／監査済み成果物のミラー） |
+   | `requirements_hashed` | ハッシュ検証付きで**先に**入れる requirements ファイルの一覧（任意、後述） |
    | `notes` | インストール完了時に表示する補足（**英語で**） |
 
    `version` と `package` はワークフローが自動で埋めます。初期値は `version: "0.0.0"`、`package.url: ""` のままにしてください。
@@ -118,6 +119,35 @@ Valles の例:
 ```
 
 設定ファイル、ダウンロードしたモデル、キャッシュなどが対象です。
+
+### `requirements_hashed`（監査済み依存のハッシュ検証）
+
+依存パッケージの**成果物そのものを監査した**場合、その正確なダイジェストでインストールを縛れます。ツール側にハッシュ付きの requirements ファイルを 1 つ置き、マニフェストから指すだけです。
+
+```json
+"requirements_hashed": ["requirements-pywebrtc.txt"],
+"requirements": "requirements.txt"
+```
+
+インストーラはこのファイルを `--no-deps --require-hashes` で、**本体の `requirements.txt` より先に**入れます。守るべき点が 3 つあります。
+
+1. **ファイルを分ける。** pip も uv もハッシュ検証は「ファイル単位で全部か無しか」です。`requirements.txt` の 1 行だけにハッシュを足すことはできず、他の全パッケージにもハッシュが必要になります（PyOgg のように wheel リンクから入るものは供給できません）。だから別ファイルにします
+2. **順序が逆だと検証が消える。** 同じピンは `requirements.txt` にも書いておきます（開発者の素の `pip install -r requirements.txt` を動かすため）。しかし既に入っている要求に対して pip / uv は何も検証しないので、本体を先に流すとハッシュ検証は一度も走りません。インストーラ側でこの順序を固定し、テストで守っています
+3. **配布物に必ず同梱する。** マニフェストが指すファイルが zip に無いとインストールは**失敗します**（黙って飛ばすと「検証したつもり」の環境が出来上がるため）。`.gitattributes` の `export-ignore` で除外していないか確認してください
+
+wheel を `wheels` にミラーしてある場合は `--find-links` から供給されるため、上流のパッケージが PyPI から消えてもインストールできます。ミラーの sha256 は PyPI の公表値と同一なので、ハッシュ検証はミラー経由でもそのまま通ります。
+
+> **Valles は次のリリースでこの 2 行が必要です。** `requirements-pywebrtc.txt`（監査済み `pywebrtc-audio`）は valles#67 で追加されましたが、現在配布中の 1.0.0 の zip にはまだ入っていません。**1.0.0 のマニフェストに書くとインストールが失敗します。** #67 以降を含む版をリリースするときに、`tools/valles.json` へ次を追加してください。
+>
+> ```json
+> "requirements_hashed": ["requirements-pywebrtc.txt"],
+> "wheels": [
+>   "wheels/PyOgg-0.7-py2.py3-none-win_amd64.whl",
+>   "wheels/pywebrtc-audio-0.1.0/pywebrtc_audio-0.1.0-cp312-cp312-win_amd64.whl"
+> ]
+> ```
+>
+> wheel は `python` に指定した版に合わせます（現在は 3.12 なので cp312）。Python の版を上げるときは wheel の行も合わせて直してください。ミラーには cp310〜cp313 の win_amd64 が揃っています。
 
 ---
 

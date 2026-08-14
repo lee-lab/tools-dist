@@ -39,6 +39,10 @@ if ($errors.Count -gt 0) { throw "install.ps1 に構文エラーがあります"
 $funcs = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)
 foreach ($f in $funcs) { Invoke-Expression $f.Extent.Text }
 
+# Fail は exit 1 するため、失敗経路をこのプロセス内で試すには一時的に差し替える
+# 必要がある。元の定義を控えておき、試したあとで戻す。
+$failFuncText = @($funcs | Where-Object { $_.Name -eq 'Fail' })[0].Extent.Text
+
 # --- Install-Tool が参照するスクリプト変数 ----------------------------------
 $Publisher    = 'Lee Lab'
 $RegistryRoot = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
@@ -235,6 +239,65 @@ Install-Tool $entry | Out-Null
 Check 'plain package installs'  (Test-Path (Join-Path $appDir 'main.py'))
 Check 'registered as 1.2.4'     ($script:Registered.Version -eq '1.2.4')
 Check 'settings still preserved' ((Get-Content (Join-Path $appDir 'settings.json') -Raw).Trim() -eq 'MY-SETTINGS')
+
+# --- ハッシュ検証付きの依存 (requirements_hashed) -----------------------------
+# 監査済みの成果物をピン留めしたファイルは、本体の requirements.txt より「先に」
+# 入れなければならない。同じピンが requirements.txt にも書かれており、既に入って
+# いる要求に対して pip / uv は何も検証しないため、順序が逆だとハッシュ検証が
+# 一度も走らない（valles#67 で実際に踏んだ罠）。
+Write-Host ''
+Write-Host 'ハッシュ検証付きの依存 (requirements_hashed)' -ForegroundColor Yellow
+
+Set-Content -Path (Join-Path $appSrc 'requirements-audited.txt') -Value @(
+    '# 検証用。実際の導入は Invoke-Uv を差し替えているため走らない',
+    'audited-package==1.0.0 \',
+    '    --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000'
+)
+$hashedZip = Join-Path $sandbox 'flowtest-1.2.5.zip'
+Compress-Archive -Path $appSrc -DestinationPath $hashedZip -Force
+Copy-Item $hashedZip (Join-Path $distDir 'releases\flowtest-hashed.zip')
+$manifest.package = [ordered] @{
+    url = "$BaseUrl/releases/flowtest-hashed.zip"
+    sha256 = (Get-FileHash -Path $hashedZip -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+$manifest.version = '1.2.5'
+$manifest.requirements_hashed = @('requirements-audited.txt')
+$manifest | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $distDir 'tools\flowtest.json') -Encoding UTF8
+
+$script:UvCalls.Clear(); $script:Shortcuts.Clear()
+Install-Tool $entry | Out-Null
+
+$hashedIdx = -1
+$plainIdx = -1
+for ($i = 0; $i -lt $script:UvCalls.Count; $i++) {
+    $call = $script:UvCalls[$i]
+    if ($call -notlike 'pip install*') { continue }
+    if ($call -like '*--require-hashes*') {
+        if ($hashedIdx -lt 0) { $hashedIdx = $i }
+    } elseif ($plainIdx -lt 0) {
+        $plainIdx = $i
+    }
+}
+Check 'two pip installs happen'   (@($script:UvCalls | Where-Object { $_ -like 'pip install*' }).Count -eq 2)
+Check 'hashed install uses --require-hashes' ($hashedIdx -ge 0)
+Check 'hashed install uses --no-deps' ($hashedIdx -ge 0 -and $script:UvCalls[$hashedIdx] -like '*--no-deps*')
+Check 'hashed install names the file' ($hashedIdx -ge 0 -and $script:UvCalls[$hashedIdx] -like '*requirements-audited.txt*')
+Check 'hashed install gets --find-links' ($hashedIdx -ge 0 -and $script:UvCalls[$hashedIdx] -like '*--find-links*')
+Check 'hashed install runs BEFORE the main one' ($hashedIdx -ge 0 -and $plainIdx -gt $hashedIdx)
+Check 'main install has no --require-hashes' ($plainIdx -ge 0 -and $script:UvCalls[$plainIdx] -notlike '*--require-hashes*')
+
+# 配布物に当該ファイルが無いときは黙って飛ばさず、失敗すること。飛ばしてしまうと
+# 「検証したつもりで検証していない」インストールが出来上がる。
+$script:UvCalls.Clear()
+function Fail([string] $Text) { throw "INSTALLER-FAIL: $Text" }
+$manifest.version = '1.2.6'
+$manifest.requirements_hashed = @('requirements-not-shipped.txt')
+$manifest | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $distDir 'tools\flowtest.json') -Encoding UTF8
+$caught = ''
+try { Install-Tool $entry | Out-Null } catch { $caught = $_.Exception.Message }
+Check 'missing hashed file refuses install' ($caught -like '*INSTALLER-FAIL*requirements-not-shipped.txt*') $caught
+Check 'and nothing was installed first'     (@($script:UvCalls | Where-Object { $_ -like 'pip install*' }).Count -eq 0)
+Invoke-Expression $failFuncText   # Fail を元に戻す
 
 } finally {
     Remove-Item Env:\LEELAB_PASSWORD -ErrorAction SilentlyContinue
