@@ -299,6 +299,82 @@ Check 'missing hashed file refuses install' ($caught -like '*INSTALLER-FAIL*requ
 Check 'and nothing was installed first'     (@($script:UvCalls | Where-Object { $_ -like 'pip install*' }).Count -eq 0)
 Invoke-Expression $failFuncText   # Fail を元に戻す
 
+# --- ネイティブアプリ (kind: native) -----------------------------------------
+# ビルド済みの実行ファイルを配る種別。uv / Python / venv を一切通らないこと、
+# ショートカットが実行ファイルを直接指し、作業フォルダが app に向くことを確認する。
+# MMDAgent-EX はカレントディレクトリを基準にコンテンツを読み書きするため、
+# 作業フォルダの指定を落とすと利用者のデータが別の場所に散らばる。
+Write-Host ''
+Write-Host 'ネイティブアプリ (kind: native)' -ForegroundColor Yellow
+
+$nativeSrc = Join-Path $sandbox 'nativesrc'
+New-Item -ItemType Directory -Force -Path (Join-Path $nativeSrc 'AppData') | Out-Null
+Set-Content -Path (Join-Path $nativeSrc 'FlowNative.exe')     -Value 'stub executable'
+Set-Content -Path (Join-Path $nativeSrc 'FlowNative.mdf')     -Value 'stub config'
+Set-Content -Path (Join-Path $nativeSrc 'AppData\data.bin')   -Value 'stub data'
+# 配布物は単一の親フォルダで包まない形（複数ルート）。実際の MMDAgent-EX の
+# 配布 zip と同じ構造にしておく。
+$nativeZip = Join-Path $sandbox 'flownative-2.0.0.zip'
+Compress-Archive -Path (Join-Path $nativeSrc '*') -DestinationPath $nativeZip -Force
+Copy-Item $nativeZip (Join-Path $distDir 'releases\flownative-2.0.0.zip')
+
+$nativeManifest = [ordered] @{
+    schema = 1; name = 'flownative'; display_name = 'Flow Native'
+    description = '配線検証用（ネイティブ）'; version = '2.0.0'; kind = 'native'
+    package = [ordered] @{
+        url = "$BaseUrl/releases/flownative-2.0.0.zip"
+        sha256 = (Get-FileHash -Path $nativeZip -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    exe = 'FlowNative.exe'
+    shortcuts = [ordered] @{ desktop = $true; start_menu = $true; console_variant = $true }
+}
+$nativeManifest | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $distDir 'tools\flownative.json') -Encoding UTF8
+$nativeEntry = [pscustomobject] @{ name = 'flownative'; display_name = 'Flow Native'; manifest = 'tools/flownative.json' }
+
+$script:UvCalls.Clear(); $script:Shortcuts.Clear()
+Install-Tool $nativeEntry | Out-Null
+
+$nativeRoot = Join-Path $InstallRoot 'flownative'
+$nativeApp  = Join-Path $nativeRoot 'app'
+Check 'native exe extracted'      (Test-Path (Join-Path $nativeApp 'FlowNative.exe'))
+Check 'native subdir extracted'   (Test-Path (Join-Path $nativeApp 'AppData\data.bin'))
+Check 'native skips uv entirely'  (@($script:UvCalls).Count -eq 0)
+Check 'no venv created'           (-not (Test-Path (Join-Path $nativeRoot '.venv')))
+Check 'native registered as 2.0.0' ($script:Registered.Version -eq '2.0.0')
+
+# console_variant を要求されていても、ネイティブには別のコンソール版が無いので
+# 作らないこと。作ると中身の無い窓が開くだけで、利用者を混乱させる。
+Check 'native shortcut count'     (@($script:Shortcuts).Count -eq 2)
+Check 'no diagnostic shortcut'    (@($script:Shortcuts | Where-Object { $_.Path -like '*Diagnostic Mode*' }).Count -eq 0)
+$nativeMain = $script:Shortcuts | Where-Object { $_.Path -like '*Desktop*' } | Select-Object -First 1
+Check 'shortcut targets the exe'  ($nativeMain.Target -eq (Join-Path $nativeApp 'FlowNative.exe'))
+Check 'native shortcut workdir'   ($nativeMain.WorkingDirectory -eq $nativeApp)
+Check 'icon falls back to the exe' ($nativeMain.IconPath -eq (Join-Path $nativeApp 'FlowNative.exe'))
+
+$nativeState = Get-Content -Raw (Join-Path $nativeRoot 'install.json') | ConvertFrom-Json
+Check 'state records the kind'    ($nativeState.kind -eq 'native')
+Check 'state has no venv_dir'     (-not (@($nativeState.PSObject.Properties.Name) -contains 'venv_dir'))
+
+# 配布物に実行ファイルが無いときは、ショートカットだけ作って成功したことにせず
+# 失敗すること。壊れたショートカットを残す方が利用者には分かりにくい。
+function Fail([string] $Text) { throw "INSTALLER-FAIL: $Text" }
+$nativeManifest.version = '2.0.1'
+$nativeManifest.exe = 'NotShipped.exe'
+$nativeManifest | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $distDir 'tools\flownative.json') -Encoding UTF8
+$caughtExe = ''
+try { Install-Tool $nativeEntry | Out-Null } catch { $caughtExe = $_.Exception.Message }
+Check 'missing exe refuses install' ($caughtExe -like '*INSTALLER-FAIL*NotShipped.exe*') $caughtExe
+
+# 将来 kind が増えたとき、古いインストーラが Python ツールとして誤って処理する
+# ことのないよう、知らない kind では止まること。
+$nativeManifest.exe = 'FlowNative.exe'
+$nativeManifest.kind = 'wasm'
+$nativeManifest | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $distDir 'tools\flownative.json') -Encoding UTF8
+$caughtKind = ''
+try { Install-Tool $nativeEntry | Out-Null } catch { $caughtKind = $_.Exception.Message }
+Check 'unknown kind refuses install' ($caughtKind -like '*INSTALLER-FAIL*wasm*') $caughtKind
+Invoke-Expression $failFuncText   # Fail を元に戻す
+
 } finally {
     Remove-Item Env:\LEELAB_PASSWORD -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force $sandbox -ErrorAction SilentlyContinue

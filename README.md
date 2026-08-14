@@ -22,6 +22,7 @@ Tools that have not been released publicly yet are distributed in encrypted form
 | Tool | Description |
 |---|---|
 | [Valles](https://github.com/lee-lab/valles) | Remote control application for MMDAgent-EX |
+| [MMDAgent-EX](https://github.com/lee-lab/MMDAgent-EX) | Voice interaction platform with 3D CG characters |
 
 ---
 

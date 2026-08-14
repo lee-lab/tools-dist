@@ -59,7 +59,9 @@ Open Windows **Settings > Apps > Installed apps**, find the tool by name, and un
 
 **The app does not start, or the window disappears immediately**
 
-Start it from **"(tool name) (Diagnostic Mode)"** in the `Lee Lab` folder of your Start menu. A console window will show the error message. Please copy that text, or take a photo of it, and send it to us.
+If the `Lee Lab` folder of your Start menu has a **"(tool name) (Diagnostic Mode)"** entry, start it from there. A console window will show the error message. Please copy that text, or take a photo of it, and send it to us.
+
+Some tools do not have that entry. In that case, please tell us what you saw: how far it got, and the wording of any error.
 
 **"running scripts is disabled on this system"**
 
