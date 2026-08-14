@@ -13,11 +13,15 @@
     Administrator rights are not needed. Everything goes under %LOCALAPPDATA%\LeeLab\.
 
     What this script does:
-        1. Install uv (a Python environment manager)
-        2. Let uv provide the Python the tool needs (the user never installs Python)
-        3. Fetch the tool from GitHub Releases, verify its SHA256, and extract it
-        4. Create a dedicated virtual environment and install the dependencies
-        5. Create shortcuts on the desktop and in the Start menu
+        1. Fetch the tool from GitHub Releases, verify its SHA256, and extract it
+        2. For a Python tool, install uv (a Python environment manager), let it
+           provide the Python the tool needs (the user never installs Python),
+           and build a dedicated virtual environment with the dependencies
+        3. Create shortcuts on the desktop and in the Start menu
+
+    Tools come in two kinds, chosen by "kind" in the tool manifest:
+        python   (the default) started by the interpreter in its own venv
+        native   a prebuilt Windows executable, started directly
 
     Runs on Windows PowerShell 5.1 (the default on Windows 10 / 11).
 #>
@@ -484,7 +488,16 @@ function Expand-Package([string] $ZipPath, [string] $Destination) {
     $staging = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
     New-Item -ItemType Directory -Force -Path $staging | Out-Null
     try {
-        Expand-Archive -Path $ZipPath -DestinationPath $staging -Force
+        # Expand-Archive drives the extraction from PowerShell one entry at a
+        # time, which a native tool's package (hundreds of megabytes, thousands
+        # of files) makes unbearably slow. The .NET call below does the same
+        # work in one step. Both paths must be absolute: the .NET API resolves a
+        # relative path against the process working directory, which is not
+        # necessarily the one PowerShell shows.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::ExtractToDirectory(
+            [System.IO.Path]::GetFullPath($ZipPath),
+            [System.IO.Path]::GetFullPath($staging))
 
         # When the zip is wrapped in one folder (valles-1.0.0/ and the like),
         # place the contents of that folder into the destination.
@@ -651,6 +664,12 @@ function Install-Tool($Entry) {
 
     $displayName = Get-Prop $m 'display_name' $name
     $version     = Get-Prop $m 'version' '0.0.0'
+    # 'python' is the default so that manifests written before native tools
+    # existed keep working untouched.
+    $kind        = Get-Prop $m 'kind' 'python'
+    if ($kind -ne 'python' -and $kind -ne 'native') {
+        Fail "This installer does not understand how to install $displayName (unknown kind: $kind). Please contact the developer."
+    }
     $pkg         = Get-Prop $m 'package'
     if ($null -eq $pkg) { Fail "The distribution info for $displayName is incomplete (no package section)." }
     $pkgUrl = Get-Prop $pkg 'url' ''
@@ -689,14 +708,19 @@ function Install-Tool($Entry) {
     Write-Host "  Install location: $toolRoot" -ForegroundColor DarkGray
     Write-Host ''
 
-    # --- uv and Python -----------------------------------------------------
-    $uv = Install-Uv
+    # --- uv and Python (Python tools only) ---------------------------------
+    # A native tool ships its own runtime, so none of this applies to it.
+    $uv = $null
+    $python = ''
+    if ($kind -eq 'python') {
+        $uv = Install-Uv
 
-    $python = Get-Prop $m 'python' '3.12'
-    Write-Step "Preparing Python $python..."
-    Invoke-Uv $uv @('python', 'install', $python) `
-        "Failed to install Python $python."
-    Write-Ok "Python $python is ready"
+        $python = Get-Prop $m 'python' '3.12'
+        Write-Step "Preparing Python $python..."
+        Invoke-Uv $uv @('python', 'install', $python) `
+            "Failed to install Python $python."
+        Write-Ok "Python $python is ready"
+    }
 
     # --- Fetch the package -------------------------------------------------
     $work = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
@@ -732,82 +756,85 @@ function Install-Tool($Entry) {
         Write-Ok 'Extracted'
 
         # --- Dependencies ---------------------------------------------------
-        # Fetch the wheels this repository supplies and point pip at them. Two
-        # kinds live there: packages PyPI does not carry at all (PyOgg 0.7), and
-        # mirrors of audited artifacts, so that a hash-pinned install below can
-        # be satisfied even if the upstream project disappears.
-        $wheelDir = Join-Path $work 'wheels'
-        New-Item -ItemType Directory -Force -Path $wheelDir | Out-Null
-        $wheels = @(Get-Prop $m 'wheels' @())
-        foreach ($w in $wheels) {
-            $fileName = Split-Path -Leaf $w
-            Save-RemoteFile "$BaseUrl/$w" (Join-Path $wheelDir $fileName)
-        }
-        if ($wheels.Count -gt 0) { Write-Ok "Fetched bundled components ($($wheels.Count) item(s))" }
-
-        Write-Step 'Creating an isolated Python environment...'
-        # Without --clear this fails on update because the environment exists.
-        # Recreating it also stops packages that an older version needed, and that
-        # are no longer required, from lingering. uv reuses already-downloaded
-        # wheels from its cache, so recreating costs no network traffic.
-        Invoke-Uv $uv @('venv', '--clear', '--python', $python, $venvDir) 'Failed to create the Python environment.'
-
-        $venvPython = Join-Path $venvDir 'Scripts\python.exe'
-        if (-not (Test-Path $venvPython)) { Fail 'Failed to create the Python environment.' }
-
-        $reqName = Get-Prop $m 'requirements' 'requirements.txt'
-        $reqPath = Join-Path $appDir $reqName
-        if (-not (Test-Path $reqPath)) { Fail "$reqName is missing from the package." }
-
-        # Hash-pinned requirement files, installed BEFORE the main one. A tool
-        # ships one for a dependency whose exact artifact was audited (Valles
-        # does for pywebrtc-audio, lee-lab/valles#67): both pip and uv verify
-        # hashes per FILE and all-or-nothing, so an audited pin cannot just be
-        # annotated inside requirements.txt -- everything else there would then
-        # need a hash too, and some of it cannot supply one (PyOgg comes from
-        # the wheel link below). It has to live in a file of its own.
-        #
-        # The ORDER is what makes the verification real. The same pin is
-        # repeated in the main requirements.txt so that a plain developer
-        # install works without this step, and a requirement that is already
-        # satisfied is never verified again -- run the main file first and the
-        # hash check silently passes over an unverified package.
-        #
-        # --no-deps because hash mode demands a hash for every package it would
-        # install, dependencies included; those belong to the main file.
-        $hashedReqs = @(Get-Prop $m 'requirements_hashed' @())
-        foreach ($hashedReq in $hashedReqs) {
-            $hashedPath = Join-Path $appDir $hashedReq
-            if (-not (Test-Path $hashedPath)) {
-                Fail "$hashedReq is missing from the package. Please contact the developer."
+        # Only a Python tool has any. A native package already carries every
+        # library it needs, so there is nothing to do for one here.
+        if ($kind -eq 'python') {
+            # Fetch the wheels this repository supplies and point pip at them. Two
+            # kinds live there: packages PyPI does not carry at all (PyOgg 0.7), and
+            # mirrors of audited artifacts, so that a hash-pinned install below can
+            # be satisfied even if the upstream project disappears.
+            $wheelDir = Join-Path $work 'wheels'
+            New-Item -ItemType Directory -Force -Path $wheelDir | Out-Null
+            $wheels = @(Get-Prop $m 'wheels' @())
+            foreach ($w in $wheels) {
+                $fileName = Split-Path -Leaf $w
+                Save-RemoteFile "$BaseUrl/$w" (Join-Path $wheelDir $fileName)
             }
-            Write-Step "Checking a verified component ($hashedReq)..."
+            if ($wheels.Count -gt 0) { Write-Ok "Fetched bundled components ($($wheels.Count) item(s))" }
+
+            Write-Step 'Creating an isolated Python environment...'
+            # Without --clear this fails on update because the environment exists.
+            # Recreating it also stops packages that an older version needed, and that
+            # are no longer required, from lingering. uv reuses already-downloaded
+            # wheels from its cache, so recreating costs no network traffic.
+            Invoke-Uv $uv @('venv', '--clear', '--python', $python, $venvDir) 'Failed to create the Python environment.'
+
+            $venvPython = Join-Path $venvDir 'Scripts\python.exe'
+            if (-not (Test-Path $venvPython)) { Fail 'Failed to create the Python environment.' }
+
+            $reqName = Get-Prop $m 'requirements' 'requirements.txt'
+            $reqPath = Join-Path $appDir $reqName
+            if (-not (Test-Path $reqPath)) { Fail "$reqName is missing from the package." }
+
+            # Hash-pinned requirement files, installed BEFORE the main one. A tool
+            # ships one for a dependency whose exact artifact was audited (Valles
+            # does for pywebrtc-audio, lee-lab/valles#67): both pip and uv verify
+            # hashes per FILE and all-or-nothing, so an audited pin cannot just be
+            # annotated inside requirements.txt -- everything else there would then
+            # need a hash too, and some of it cannot supply one (PyOgg comes from
+            # the wheel link below). It has to live in a file of its own.
+            #
+            # The ORDER is what makes the verification real. The same pin is
+            # repeated in the main requirements.txt so that a plain developer
+            # install works without this step, and a requirement that is already
+            # satisfied is never verified again -- run the main file first and the
+            # hash check silently passes over an unverified package.
+            #
+            # --no-deps because hash mode demands a hash for every package it would
+            # install, dependencies included; those belong to the main file.
+            $hashedReqs = @(Get-Prop $m 'requirements_hashed' @())
+            foreach ($hashedReq in $hashedReqs) {
+                $hashedPath = Join-Path $appDir $hashedReq
+                if (-not (Test-Path $hashedPath)) {
+                    Fail "$hashedReq is missing from the package. Please contact the developer."
+                }
+                Write-Step "Checking a verified component ($hashedReq)..."
+                Invoke-Uv $uv @(
+                    'pip', 'install',
+                    '--python', $venvPython,
+                    '--no-deps',
+                    '--require-hashes',
+                    '-r', $hashedPath,
+                    '--find-links', $wheelDir
+                ) "A component did not match its expected contents ($hashedReq). Please contact the developer."
+                Write-Ok "Verified $hashedReq"
+            }
+
+            Write-Step 'Installing required components... (this takes a few minutes, please wait)'
             Invoke-Uv $uv @(
                 'pip', 'install',
                 '--python', $venvPython,
-                '--no-deps',
-                '--require-hashes',
-                '-r', $hashedPath,
+                '-r', $reqPath,
                 '--find-links', $wheelDir
-            ) "A component did not match its expected contents ($hashedReq). Please contact the developer."
-            Write-Ok "Verified $hashedReq"
+            ) 'Failed to install the required components.'
+            Write-Ok 'Required components installed'
         }
-
-        Write-Step 'Installing required components... (this takes a few minutes, please wait)'
-        Invoke-Uv $uv @(
-            'pip', 'install',
-            '--python', $venvPython,
-            '-r', $reqPath,
-            '--find-links', $wheelDir
-        ) 'Failed to install the required components.'
-        Write-Ok 'Required components installed'
 
     } finally {
         Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
     }
 
     # --- Shortcuts ---------------------------------------------------------
-    $entryScript = Get-Prop $m 'entry' 'main.py'
     $iconName = Get-Prop $m 'icon' ''
     $iconPath = ''
     if ($iconName) {
@@ -815,33 +842,57 @@ function Install-Tool($Entry) {
         if (Test-Path $candidate) { $iconPath = $candidate }
     }
 
-    $pythonw = Join-Path $venvDir 'Scripts\pythonw.exe'
-    if (-not (Test-Path $pythonw)) { $pythonw = $venvPython }
+    # What a shortcut points at depends on the kind: a native tool is started
+    # directly, a Python tool through the interpreter in its own environment.
+    # $consoleTarget stays empty when the tool has no useful console variant.
+    $consoleTarget = ''
+    if ($kind -eq 'native') {
+        $exeName = Get-Prop $m 'exe' ''
+        if ([string]::IsNullOrWhiteSpace($exeName)) {
+            Fail "The distribution info for $displayName is incomplete (no exe entry). Please contact the developer."
+        }
+        $launchTarget = Join-Path $appDir $exeName
+        if (-not (Test-Path $launchTarget)) {
+            Fail "$exeName is missing from the package. Please contact the developer."
+        }
+        $launchArgs = Get-Prop $m 'args' ''
+        # A native tool usually carries its own icon, so fall back to the
+        # executable when the manifest does not name an icon file.
+        if (-not $iconPath) { $iconPath = $launchTarget }
+    } else {
+        $launchArgs = Get-Prop $m 'entry' 'main.py'
+        $consoleTarget = $venvPython
+        $launchTarget = Join-Path $venvDir 'Scripts\pythonw.exe'
+        if (-not (Test-Path $launchTarget)) { $launchTarget = $venvPython }
+    }
 
     $shortcutOpts = Get-Prop $m 'shortcuts'
     $wantDesktop  = [bool] (Get-Prop $shortcutOpts 'desktop' $true)
     $wantStart    = [bool] (Get-Prop $shortcutOpts 'start_menu' $true)
     $wantConsole  = [bool] (Get-Prop $shortcutOpts 'console_variant' $false)
+    # Asking for a console variant of a tool that has none would produce a
+    # shortcut that shows an empty window, which is worse than no shortcut.
+    if ($wantConsole -and [string]::IsNullOrWhiteSpace($consoleTarget)) { $wantConsole = $false }
 
     $startMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$Publisher"
     $createdShortcuts = New-Object System.Collections.ArrayList
 
     if ($wantDesktop) {
         $p = Join-Path ([Environment]::GetFolderPath('Desktop')) "$displayName.lnk"
-        New-Shortcut -Path $p -Target $pythonw -Arguments $entryScript `
+        New-Shortcut -Path $p -Target $launchTarget -Arguments $launchArgs `
             -WorkingDirectory $appDir -IconPath $iconPath -Description $displayName
         [void] $createdShortcuts.Add($p)
     }
     if ($wantStart) {
         $p = Join-Path $startMenuDir "$displayName.lnk"
-        New-Shortcut -Path $p -Target $pythonw -Arguments $entryScript `
+        New-Shortcut -Path $p -Target $launchTarget -Arguments $launchArgs `
             -WorkingDirectory $appDir -IconPath $iconPath -Description $displayName
         [void] $createdShortcuts.Add($p)
     }
     if ($wantConsole) {
         # For troubleshooting: keeps the console open so errors stay readable.
         $p = Join-Path $startMenuDir "$displayName (Diagnostic Mode).lnk"
-        New-Shortcut -Path $p -Target $venvPython -Arguments $entryScript `
+        New-Shortcut -Path $p -Target $consoleTarget -Arguments $launchArgs `
             -WorkingDirectory $appDir -IconPath $iconPath `
             -Description "Starts $displayName with a console window so error messages are visible"
         [void] $createdShortcuts.Add($p)
@@ -853,11 +904,14 @@ function Install-Tool($Entry) {
         name         = $name
         display_name = $displayName
         version      = $version
-        python       = $python
+        kind         = $kind
         app_dir      = $appDir
-        venv_dir     = $venvDir
         shortcuts    = @($createdShortcuts)
         base_url     = $BaseUrl
+    }
+    if ($kind -eq 'python') {
+        $state['python']   = $python
+        $state['venv_dir'] = $venvDir
     }
     $state | ConvertTo-Json -Depth 5 | Set-Content -Path $stateFile -Encoding UTF8
 

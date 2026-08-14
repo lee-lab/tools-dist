@@ -6,6 +6,12 @@
       "display_name": "Valles",
       "description": "Remote control application for MMDAgent-EX",
       "manifest": "tools/valles.json"
+    },
+    {
+      "name": "mmdagent-ex",
+      "display_name": "MMDAgent-EX",
+      "description": "Voice interaction platform with 3D CG characters",
+      "manifest": "tools/mmdagent-ex.json"
     }
   ]
 }

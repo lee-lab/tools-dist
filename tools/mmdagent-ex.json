@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "name": "mmdagent-ex",
+  "display_name": "MMDAgent-EX",
+  "description": "Voice interaction platform with 3D CG characters",
+  "kind": "native",
+  "version": "0.0.0",
+  "package": {
+    "_comment": "Filled in by the release workflow in lee-lab/MMDAgent-EX.",
+    "url": "",
+    "sha256": "",
+    "encrypted": true,
+    "kdf_iterations": 200000
+  },
+  "exe": "MMDAgent-EX.exe",
+  "shortcuts": {
+    "desktop": true,
+    "start_menu": true
+  },
+  "notes": [
+    "On first launch, enter the event code you received to download the content.",
+    "The content is saved in the MMDAgent-Contents folder on your desktop. It is kept when you update.",
+    "About 700 MB of free disk space is needed."
+  ]
+}

@@ -292,13 +292,23 @@ Remove-Item Env:\LEELAB_PASSWORD -ErrorAction SilentlyContinue
 # --- Select-Tool ------------------------------------------------------------
 Write-Host ''
 Write-Host 'Select-Tool' -ForegroundColor Yellow
+# 配布中の全ツールが、名前を指定して選べること。index.json にツールを足したら
+# ここも増やす（マニフェストの綴り違いはこの検証で落ちる）。
 $index = Get-Content -Raw $IndexPath | ConvertFrom-Json
-$Tool = 'valles'
-$picked = Select-Tool $index
-Check 'named tool selected' ($picked.name -eq 'valles')
+foreach ($t in $index.tools) {
+    $Tool = $t.name
+    Check "named tool selected ($($t.name))" ((Select-Tool $index).name -eq $t.name)
+}
+
+# ツールが 1 つだけなら、聞かずに自動選択する。実際の index.json の件数に依存
+# させると、ツールを足した瞬間に入力待ちで止まるテストになるため、ここでは
+# 1 件だけの索引を組み立てて確かめる。
 $Tool = ''
-$picked2 = Select-Tool $index      # ツールが 1 つだけなら、聞かずに自動選択する
-Check 'single tool auto-selected' ($picked2.name -eq 'valles')
+$soloIndex = [pscustomobject] @{
+    schema = 1
+    tools  = @([pscustomobject] @{ name = 'solo'; display_name = 'Solo'; manifest = 'tools/solo.json' })
+}
+Check 'single tool auto-selected' ((Select-Tool $soloIndex).name -eq 'solo')
 
 } finally {
     Remove-Item -Recurse -Force $sandbox -ErrorAction SilentlyContinue
