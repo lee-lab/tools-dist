@@ -10,6 +10,10 @@
         $env:LEELAB_TOOL = "valles"
         irm https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.ps1 | iex
 
+    To install from the alpha channel (for lab members helping with testing):
+        $env:LEELAB_CHANNEL = "alpha"
+        irm https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.ps1 | iex
+
     Administrator rights are not needed. Everything goes under %LOCALAPPDATA%\LeeLab\.
 
     What this script does:
@@ -22,6 +26,10 @@
     Tools come in two kinds, chosen by "kind" in the tool manifest:
         python   (the default) started by the interpreter in its own venv
         native   a prebuilt Windows executable, started directly
+
+    Releases come in two channels, chosen by -Channel or LEELAB_CHANNEL:
+        beta     (the default) the version everyone is asked to use
+        alpha    the newest build, updated often, for people helping to test it
 
     Runs on Windows PowerShell 5.1 (the default on Windows 10 / 11).
 #>
@@ -50,6 +58,9 @@ param(
     # Base URL of the distribution repository. Change only for forks or testing.
     [string] $BaseUrl = '',
 
+    # Release channel to install from: 'beta' (default) or 'alpha'.
+    [string] $Channel = '',
+
     # Root install location. Defaults to %LOCALAPPDATA%\LeeLab
     [string] $InstallRoot = '',
 
@@ -75,12 +86,20 @@ $UvInstallerUrl = 'https://astral.sh/uv/install.ps1'
 $RegistryRoot   = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
 $Publisher      = 'Lee Lab'
 
+# Release channels. The default one keeps the plain manifest path
+# (tools/<tool>.json), so a run with no channel behaves exactly as before.
+$DefaultChannel = 'beta'
+$KnownChannels  = @('alpha', 'beta')
+
 if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
     if ($env:LEELAB_BASE_URL) { $BaseUrl = $env:LEELAB_BASE_URL } else { $BaseUrl = $DefaultBaseUrl }
 }
 $BaseUrl = $BaseUrl.TrimEnd('/')
 
 if ([string]::IsNullOrWhiteSpace($Tool) -and $env:LEELAB_TOOL) { $Tool = $env:LEELAB_TOOL }
+
+if ([string]::IsNullOrWhiteSpace($Channel) -and $env:LEELAB_CHANNEL) { $Channel = $env:LEELAB_CHANNEL }
+# The value is checked further down, once Fail is available.
 
 if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
     $InstallRoot = Join-Path $env:LOCALAPPDATA 'LeeLab'
@@ -132,6 +151,33 @@ function Get-Prop($Object, [string] $Name, $Default = $null) {
 }
 
 # ---------------------------------------------------------------------------
+# Release channels
+# ---------------------------------------------------------------------------
+
+# Turns whatever the user gave us into a known channel name. An empty value
+# means the default channel, so a plain one-liner run keeps installing beta.
+function Resolve-Channel([string] $Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $DefaultChannel }
+    $normalised = $Value.Trim().ToLowerInvariant()
+    if ($KnownChannels -notcontains $normalised) {
+        Fail "There is no release channel named '$Value'. Available channels: $($KnownChannels -join ', ')"
+    }
+    return $normalised
+}
+
+# Where a channel keeps its manifest. The default channel uses the path as it
+# stands (tools/valles.json); any other channel has its name inserted before
+# the extension (tools/valles-alpha.json).
+function Get-ManifestPath([string] $Path, [string] $ChannelName) {
+    if ([string]::IsNullOrWhiteSpace($ChannelName) -or $ChannelName -eq $DefaultChannel) { return $Path }
+    $dot = $Path.LastIndexOf('.')
+    # Only an extension on the file name itself counts; a dot in a folder name
+    # further up the path is not one.
+    if ($dot -lt 0 -or $dot -lt $Path.LastIndexOf('/')) { return "$Path-$ChannelName" }
+    return $Path.Substring(0, $dot) + '-' + $ChannelName + $Path.Substring($dot)
+}
+
+# ---------------------------------------------------------------------------
 # Environment checks
 # ---------------------------------------------------------------------------
 
@@ -151,7 +197,30 @@ function Test-Environment {
 # Downloading
 # ---------------------------------------------------------------------------
 
-function Get-RemoteJson([string] $Url) {
+# True when a download failed because the file is not there, rather than because
+# the network is unreachable. The exception that says so is wrapped a couple of
+# layers deep (PowerShell wraps the WebException in turn), so walk the chain.
+function Test-NotFoundError($ErrorRecord) {
+    $ex = $ErrorRecord.Exception
+    while ($null -ne $ex) {
+        # An HTTP server answers 404; a file:// URL (which the tests use) raises
+        # a FileNotFoundException instead. Both mean the same thing here.
+        if ($ex -is [System.IO.FileNotFoundException] -or $ex -is [System.IO.DirectoryNotFoundException]) {
+            return $true
+        }
+        $web = $ex -as [System.Net.WebException]
+        if ($null -ne $web -and $null -ne $web.Response) {
+            $http = $web.Response -as [System.Net.HttpWebResponse]
+            if ($null -ne $http -and $http.StatusCode -eq [System.Net.HttpStatusCode]::NotFound) {
+                return $true
+            }
+        }
+        $ex = $ex.InnerException
+    }
+    return $false
+}
+
+function Get-RemoteJson([string] $Url, [string] $NotFoundMessage = '') {
     # The server does not necessarily send a charset in Content-Type. Without one,
     # Invoke-WebRequest decodes using the default code page and any non-ASCII text
     # in the manifest is mangled. Read it as UTF-8 explicitly.
@@ -162,6 +231,11 @@ function Get-RemoteJson([string] $Url) {
         $client.Headers.Add('User-Agent', 'leelab-tools-dist-installer')
         $text = $client.DownloadString($Url)
     } catch {
+        # A file that is simply not there is not a network problem, so say what
+        # it actually means when the caller told us.
+        if (-not [string]::IsNullOrWhiteSpace($NotFoundMessage) -and (Test-NotFoundError $_)) {
+            Fail $NotFoundMessage
+        }
         Fail "Could not fetch the distribution info: $Url`n         Please check your internet connection. Details: $($_.Exception.Message)"
     } finally {
         if ($null -ne $client) { $client.Dispose() }
@@ -659,8 +733,18 @@ Write-Host ''
 
 function Install-Tool($Entry) {
     $name = $Entry.name
-    $manifestUrl = "$BaseUrl/$(Get-Prop $Entry 'manifest' "tools/$name.json")"
-    $m = Get-RemoteJson $manifestUrl
+    # index.json always names the manifest of the default channel; the path of
+    # any other channel is derived from it.
+    $manifestPath = Get-ManifestPath (Get-Prop $Entry 'manifest' "tools/$name.json") $Channel
+    $manifestUrl = "$BaseUrl/$manifestPath"
+
+    $entryName = Get-Prop $Entry 'display_name' $name
+    if ($Channel -eq $DefaultChannel) {
+        $noManifest = "$entryName has not been released yet. Please contact the developer."
+    } else {
+        $noManifest = "$entryName has not been released on the $Channel channel yet.`n         Please run the command again without setting a channel, or contact the developer."
+    }
+    $m = Get-RemoteJson $manifestUrl $noManifest
 
     $displayName = Get-Prop $m 'display_name' $name
     $version     = Get-Prop $m 'version' '0.0.0'
@@ -689,22 +773,32 @@ function Install-Tool($Entry) {
     }
     if ($null -ne $installed) {
         $installedVersion = Get-Prop $installed 'version' 'unknown'
-        Write-Head "$displayName is already installed (version $installedVersion)"
-        if ($installedVersion -eq $version) {
+        # Anything installed before channels existed came from the default one.
+        $installedChannel = Get-Prop $installed 'channel' $DefaultChannel
+        Write-Head "$displayName is already installed (version $installedVersion, $installedChannel channel)"
+        if ($installedChannel -ne $Channel) {
+            Write-Host "  You asked for the $Channel channel, where the current version is $version." -ForegroundColor White
+            Write-Host "  Going on replaces the installed $installedChannel version with it." -ForegroundColor White
+            $question = "  Switch to the $Channel channel now? (Y/n)"
+        } elseif ($installedVersion -eq $version) {
             Write-Host "  This is the same as the latest available version." -ForegroundColor DarkGray
+            $question = '  Reinstall / update now? (Y/n)'
         } else {
             Write-Host "  A newer version, $version, is available." -ForegroundColor White
+            $question = '  Reinstall / update now? (Y/n)'
         }
         if (-not $Quiet) {
             Write-Host ''
-            $answer = Read-Host '  Reinstall / update now? (Y/n)'
+            $answer = Read-Host $question
             if ($answer -eq 'n' -or $answer -eq 'N') {
                 Write-Host ''; Write-Host '  Cancelled.'; exit 0
             }
         }
     }
 
-    Write-Head "Installing $displayName $version"
+    $headline = "Installing $displayName $version"
+    if ($Channel -ne $DefaultChannel) { $headline = "$headline ($Channel channel)" }
+    Write-Head $headline
     Write-Host "  Install location: $toolRoot" -ForegroundColor DarkGray
     Write-Host ''
 
@@ -904,6 +998,7 @@ function Install-Tool($Entry) {
         name         = $name
         display_name = $displayName
         version      = $version
+        channel      = $Channel
         kind         = $kind
         app_dir      = $appDir
         shortcuts    = @($createdShortcuts)
@@ -952,6 +1047,8 @@ Write-Host '   Lee Lab Tool Installer' -ForegroundColor Cyan
 Write-Host '  ============================================' -ForegroundColor Cyan
 
 Test-Environment
+
+$Channel = Resolve-Channel $Channel
 
 $index = Get-RemoteJson "$BaseUrl/tools/index.json"
 $entry = Select-Tool $index

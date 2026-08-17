@@ -48,6 +48,9 @@ $Publisher    = 'Lee Lab'
 $RegistryRoot = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
 $Quiet        = $true
 $Tool         = 'flowtest'
+$Channel        = 'beta'
+$DefaultChannel = 'beta'
+$KnownChannels  = @('alpha', 'beta')
 
 $sandbox = Join-Path $env:TEMP ('leelab-flow-' + [System.IO.Path]::GetRandomFileName())
 $InstallRoot = Join-Path $sandbox 'installroot'
@@ -239,6 +242,61 @@ Install-Tool $entry | Out-Null
 Check 'plain package installs'  (Test-Path (Join-Path $appDir 'main.py'))
 Check 'registered as 1.2.4'     ($script:Registered.Version -eq '1.2.4')
 Check 'settings still preserved' ((Get-Content (Join-Path $appDir 'settings.json') -Raw).Trim() -eq 'MY-SETTINGS')
+
+# --- リリースチャネル --------------------------------------------------------
+# 既定 (beta) は tools/<tool>.json、それ以外は tools/<tool>-<channel>.json を読む。
+# index.json の manifest 欄は常に既定チャネルのパスで、alpha はそこから導かれる。
+# 配布物 (Release の zip) は両チャネルで共有するため、ここでも同じ zip を指す。
+Write-Host ''
+Write-Host 'リリースチャネル (alpha)' -ForegroundColor Yellow
+
+$state = Get-Content -Raw (Join-Path $toolRoot 'install.json') | ConvertFrom-Json
+Check 'state records the channel' ($state.channel -eq 'beta')
+
+Copy-Item $plainZip (Join-Path $distDir 'releases\flowtest-alpha.zip')
+$alphaManifest = [ordered] @{
+    schema = 1; name = 'flowtest'; display_name = 'Flow Test'
+    description = '配線検証用（alpha）'; version = '1.9.0'; python = '3.12'
+    package = [ordered] @{
+        url = "$BaseUrl/releases/flowtest-alpha.zip"
+        sha256 = $zipSha
+    }
+    requirements = 'requirements.txt'; entry = 'main.py'; icon = 'flowtest.ico'
+    preserve = @('settings.json', 'userdata')
+    shortcuts = [ordered] @{ desktop = $false; start_menu = $true; console_variant = $true }
+}
+$alphaManifest | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $distDir 'tools\flowtest-alpha.json') -Encoding UTF8
+
+# エントリは beta のときと同じもの（manifest 欄は tools/flowtest.json のまま）。
+$Channel = 'alpha'
+$script:UvCalls.Clear(); $script:Shortcuts.Clear()
+$alphaLog = (Install-Tool $entry 6>&1) -join "`n"
+$alphaState = Get-Content -Raw (Join-Path $toolRoot 'install.json') | ConvertFrom-Json
+Check 'alpha manifest used'        ($script:Registered.Version -eq '1.9.0')
+Check 'state records alpha'        ($alphaState.channel -eq 'alpha')
+Check 'switching channel is announced' ($alphaLog -like '*alpha channel*') $alphaLog
+Check 'settings survive the switch' ((Get-Content (Join-Path $appDir 'settings.json') -Raw).Trim() -eq 'MY-SETTINGS')
+
+# beta に戻す。alpha より版が古くても、指定したチャネルの内容を入れること。
+$Channel = 'beta'
+$script:UvCalls.Clear(); $script:Shortcuts.Clear()
+$backLog = (Install-Tool $entry 6>&1) -join "`n"
+$backState = Get-Content -Raw (Join-Path $toolRoot 'install.json') | ConvertFrom-Json
+Check 'back on the beta manifest'  ($script:Registered.Version -eq '1.2.4')
+Check 'state records beta again'   ($backState.channel -eq 'beta')
+Check 'the switch back is announced' ($backLog -like '*beta channel*') $backLog
+
+# alpha のマニフェストがまだ無いツールは、通信エラーではなく「そのチャネルには
+# まだ出ていない」と伝えること。
+function Fail([string] $Text) { throw "INSTALLER-FAIL: $Text" }
+$Channel = 'alpha'
+$noAlphaEntry = [pscustomobject] @{ name = 'noalpha'; display_name = 'No Alpha'; manifest = 'tools/noalpha.json' }
+$caughtChannel = ''
+try { Install-Tool $noAlphaEntry | Out-Null } catch { $caughtChannel = $_.Exception.Message }
+Check 'missing alpha manifest is explained' `
+    ($caughtChannel -like '*INSTALLER-FAIL*not been released on the alpha channel*') $caughtChannel
+Invoke-Expression $failFuncText   # Fail を元に戻す
+$Channel = 'beta'
 
 # --- ハッシュ検証付きの依存 (requirements_hashed) -----------------------------
 # 監査済みの成果物をピン留めしたファイルは、本体の requirements.txt より「先に」
