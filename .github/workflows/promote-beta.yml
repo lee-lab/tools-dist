@@ -44,10 +44,13 @@ jobs:
 
       - name: alpha マニフェストを確認
         id: check
+        # 入力は ${{ }} でスクリプトに直接展開せず env 経由で渡す。直接展開は
+        # 値がシェルのコードとして解釈されるインジェクションになる（choice も
+        # API 経由の dispatch では任意文字列が通り得る）。
+        env:
+          TOOL: ${{ github.event.inputs.tool }}
+          VERSION: ${{ github.event.inputs.version }}
         run: |
-          TOOL="${{ github.event.inputs.tool }}"
-          VERSION="${{ github.event.inputs.version }}"
-
           case "$VERSION" in
             '')
               echo "::error::バージョンを指定してください (例: 3.12.0)"
@@ -87,8 +90,9 @@ jobs:
           PY
 
       - name: 配布物が取得できることを確認
+        env:
+          URL: ${{ steps.check.outputs.url }}
         run: |
-          URL="${{ steps.check.outputs.url }}"
           # Release の添付ファイルは実体へリダイレクトするため、302 も正常。
           CODE=$(curl -s -o /dev/null -w '%{http_code}' -I "$URL")
           case "$CODE" in
@@ -100,21 +104,24 @@ jobs:
           esac
 
       - name: beta マニフェストへ反映してコミット
+        env:
+          TOOL: ${{ github.event.inputs.tool }}
+          VERSION: ${{ github.event.inputs.version }}
+          DISPLAY_NAME: ${{ steps.check.outputs.display_name }}
         run: |
-          TOOL="${{ github.event.inputs.tool }}"
-          VERSION="${{ github.event.inputs.version }}"
-          DISPLAY_NAME="${{ steps.check.outputs.display_name }}"
-
           # 内容をそのまま写す。両チャネルは同じ配布物を指すため、書き換える
           # 項目は 1 つも無い。
           cp "tools/${TOOL}-alpha.json" "tools/${TOOL}.json"
 
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet; then
+          # 差分判定は add 後に --cached で行う。cp が beta マニフェストを
+          # 新規作成した場合は未追跡ファイルになり、git diff --quiet では
+          # 見えず「変更なし」と誤判定してしまう。
+          git add "tools/${TOOL}.json"
+          if git diff --cached --quiet; then
             echo "beta は既に ${VERSION} です（変更はありません）"
             exit 0
           fi
-          git add "tools/${TOOL}.json"
           git commit -m "${DISPLAY_NAME} ${VERSION} を beta へ昇格"
           git push
