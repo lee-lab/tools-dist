@@ -129,8 +129,9 @@ Meta Horizon Developer Dashboard に **ALPHA** と **BETA** の 2 チャネル�
 4. annotated タグの作成と push（push 直前に必ず停止して確認）
 5. CI の監視（失敗時はログ抜粋を出してそこで停止。**タグは勝手に消しません**）
 6. 公開結果の検証（alpha マニフェストと archive スナップショット、およびツール側リポジトリの Release `vX.Y.Z` のアセット）
-7. MMDAgent-EX では、同じタグから出た Quest 版の結果（Meta Horizon ALPHA へのアップロードと APK のアーカイブ）を確認
-8. 完了報告（プラットフォームごとの結果を並べ、beta はまだ変わっていないことを明示）
+7. リリースノートの清書（ツール側リポジトリに Release がある場合のみ。詳細は次段落）
+8. MMDAgent-EX では、同じタグから出た Quest 版の結果（Meta Horizon ALPHA へのアップロードと APK のアーカイブ）を確認
+9. 完了報告（プラットフォームごとの結果を並べ、beta はまだ変わっていないことを明示）
 
 ### 同等の手動手順（Windows）
 
@@ -151,7 +152,7 @@ Meta Horizon Developer Dashboard に **ALPHA** と **BETA** の 2 チャネル�
 
    ワークフローは、配布 zip の作成 → sha256 照合 → openssl で暗号化（復号の往復検証つき）→ tools-dist に Release `<tool>-v<version>` を作成 → `tools/<tool>-alpha.json` と `tools/archive/<tool>-v<version>.json` を更新して commit、の順に進みます。`kind: native`（MMDAgent-EX）では、暗号化の前に Windows ランナーでのビルドとパッケージが入ります。
 
-   あわせて、各ツールのリポジトリ側にも開発者向けの記録として Release `v<version>` が自動作成されます（MMDAgent-EX は平文 zip と Quest APK と自動生成ノート、valles はノートのみ）。自動生成ノートには前タグ以降のマージ済み PR が並ぶため、バージョン間の差分の記録になります。
+   あわせて、各ツールのリポジトリ側にも開発者向けの記録として Release `v<version>` が自動作成されます（MMDAgent-EX は平文 zip と Quest APK と自動生成ノート、valles はノートのみ）。自動生成ノートには前タグ以降のマージ済み PR が並ぶため、バージョン間の差分の記録になります。リリースノートは `/release-alpha` スキルが所定の書式（日本語→英語、カテゴリ別サマリー、`#XX` 参照、制作者名なし）に清書します。
 
 4. **alpha の**配布中バージョンが更新されたことを確認する
 
