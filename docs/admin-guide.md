@@ -149,6 +149,8 @@ Meta Horizon Developer Dashboard に **ALPHA** と **BETA** の 2 チャネル�
 
    ワークフローは、配布 zip の作成 → sha256 照合 → openssl で暗号化（復号の往復検証つき）→ tools-dist に Release `<tool>-v<version>` を作成 → `tools/<tool>-alpha.json` と `tools/archive/<tool>-v<version>.json` を更新して commit、の順に進みます。`kind: native`（MMDAgent-EX）では、暗号化の前に Windows ランナーでのビルドとパッケージが入ります。
 
+   あわせて、各ツールのリポジトリ側にも開発者向けの記録として Release `v<version>` が自動作成されます（MMDAgent-EX は平文 zip と自動生成ノート、valles はノートのみ）。自動生成ノートには前タグ以降のマージ済み PR が並ぶため、バージョン間の差分の記録になります。
+
 4. **alpha の**配布中バージョンが更新されたことを確認する
 
    ```shell
