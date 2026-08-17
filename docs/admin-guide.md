@@ -18,8 +18,45 @@
 ```
 
 - 配布物の実体は **tools-dist の Releases** に置かれます（ツールのリポジトリではありません）
-- 「今どのバージョンを配布中か」の唯一の情報源は **`tools/<tool>.json`** です
+- 「今どのバージョンを配布中か」の唯一の情報源は **`tools/<tool>.json`**（beta）と **`tools/<tool>-alpha.json`**（alpha）です
 - GitHub の `/releases/latest` は全ツール横断で最新 1 件を返すため、**使わないでください**
+
+---
+
+## リリースチャネル (alpha / beta)
+
+配布は 2 つのチャネルに分かれています。
+
+| チャネル | 対象 | マニフェスト | 利用者のコマンド |
+|---|---|---|---|
+| `beta`（既定） | 一般の利用者（Moonshot プロジェクト）。安定して使える版 | `tools/<tool>.json` | 素のワンライナー |
+| `alpha` | 研究室の実験協力者。更新頻度が高い | `tools/<tool>-alpha.json` | `$env:LEELAB_CHANNEL = 'alpha'` を付けて実行 |
+
+**beta は新しいビルドではなく、alpha に出ている版の「昇格」です。** Releases に置いた暗号化 zip（タグ `<tool>-v<version>`）は両チャネルで共有し、昇格はマニフェストの内容を写すだけです。ビルドも暗号化もやり直しません。
+
+- 素のワンライナーは今までどおり beta です。チャネルを指定しない利用者に影響はありません
+- インストーラは `install.json` にチャネルを記録し、別チャネルを指定して実行されたときは確認を求めます
+- `PAYLOAD_PASSWORD` は当面**チャネル共通**です（alpha 専用のパスワードは設けていません）
+
+### beta へ昇格する
+
+1. alpha の版が十分に確かめられたことを確認する
+
+   ```shell
+   curl -s https://raw.githubusercontent.com/lee-lab/tools-dist/main/tools/valles-alpha.json | grep version
+   ```
+
+2. tools-dist の Actions で **「Promote to beta」** を実行する（ツール名と、`v` を付けないバージョンを指定）
+
+   ```shell
+   gh workflow run promote-beta.yml --repo lee-lab/tools-dist -f tool=valles -f version=1.2.0
+   ```
+
+3. `tools/<tool>.json` が更新されたことを確認し、利用者に「更新してください」と伝える
+
+昇格できるのは**いま alpha に出ている版だけ**です。指定したバージョンが alpha のマニフェストと一致しなければワークフローは止まります（過去の版を選んでの昇格は未対応。必要になったら、そのときにワークフローを拡張してください）。
+
+> **暫定的な不整合（対応中）。** ツール側のリリースワークフロー（MMDAgent-EX の `windows-release.yml`、valles の `release.yml`）は、まだ `tools/<tool>.json` を直接更新します。alpha のマニフェストへ書くよう変更するまでの間、ツールをリリースするとその場で **beta が変わります**。後続の対応で解消する短期的な状態です。
 
 ---
 
@@ -139,6 +176,8 @@
    ショートカットの**作業フォルダは常にアプリのフォルダ**に設定されます。`console_variant` はネイティブでは無視されます（別のコンソール版が無く、中身の無い窓が開くだけになるため）。
 
    `version` と `package` はワークフローが自動で埋めます。初期値は `version: "0.0.0"`、`package.url: ""` のままにしてください。
+
+   同じ内容で `tools/<tool>-alpha.json` も作ってください（alpha チャネル用）。`tools/index.json` に書くのは beta のパス（`tools/<tool>.json`）だけで、alpha のパスはインストーラがそこから導きます。
 
 6. `tools/index.json` に 1 行追加する（`display_name` と `description` は**英語で**）
 

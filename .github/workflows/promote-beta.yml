@@ -1,0 +1,127 @@
+name: Promote to beta
+
+# alpha チャネルに出ているリリースを、そのまま beta チャネルへ昇格させます。
+#
+# beta は「新しくビルドしたもの」ではなく「alpha で出たものの昇格」です。
+# Releases に置いた暗号化 zip は両チャネルで共有しているため、この処理は
+# tools/<tool>-alpha.json の内容を tools/<tool>.json へ写すだけで、
+# ビルドも暗号化も再アップロードも行いません。
+#
+#   alpha:  tools/<tool>-alpha.json   研究室の実験協力者向け。更新頻度が高い
+#   beta :  tools/<tool>.json         一般利用者向け（既定チャネル）
+#
+# 昇格できるのは「いま alpha に出ている版」だけです。過去の版を任意に選んで
+# 昇格させることはできません（マニフェストに履歴を持たせていないため）。
+#
+# 実行方法: Actions タブからこのワークフローを選び、ツールとバージョンを指定して
+# 実行します。自分のリポジトリだけを書き換えるため、PAT は不要です。
+
+on:
+  workflow_dispatch:
+    inputs:
+      tool:
+        description: 'ツール'
+        required: true
+        type: choice
+        options:
+          - mmdagent-ex
+          - valles
+      version:
+        description: 'バージョン (例: 3.12.0、先頭に v は付けない)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    name: alpha を beta へ昇格
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v5
+
+      - name: alpha マニフェストを確認
+        id: check
+        # 入力は ${{ }} でスクリプトに直接展開せず env 経由で渡す。直接展開は
+        # 値がシェルのコードとして解釈されるインジェクションになる（choice も
+        # API 経由の dispatch では任意文字列が通り得る）。
+        env:
+          TOOL: ${{ github.event.inputs.tool }}
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          case "$VERSION" in
+            '')
+              echo "::error::バージョンを指定してください (例: 3.12.0)"
+              exit 1
+              ;;
+            v*)
+              echo "::error::バージョンは先頭の v を付けずに指定してください (例: 3.12.0)"
+              exit 1
+              ;;
+          esac
+
+          ALPHA="tools/${TOOL}-alpha.json"
+          if [ ! -f "$ALPHA" ]; then
+            echo "::error::$ALPHA がありません。このツールは alpha に一度もリリースされていません"
+            exit 1
+          fi
+
+          python3 - "$ALPHA" "$VERSION" <<'PY'
+          import json, os, sys
+          path, version = sys.argv[1:3]
+          with open(path, encoding="utf-8") as f:
+              m = json.load(f)
+          current = m.get("version", "")
+          # 昇格できるのは、いま alpha に出ている版だけ。指定が食い違ったまま
+          # 進めると、利用者には「昇格したはずの版と違うもの」が届く。
+          if current != version:
+              print(f"::error::{path} の現在の alpha は {current} です。"
+                    f"{version} への昇格はできません（過去の版を選んでの昇格は未対応）")
+              sys.exit(1)
+          url = m.get("package", {}).get("url", "")
+          if not url:
+              print(f"::error::{path} に package.url がありません")
+              sys.exit(1)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"display_name={m.get('display_name', path)}\n")
+              out.write(f"url={url}\n")
+          PY
+
+      - name: 配布物が取得できることを確認
+        env:
+          URL: ${{ steps.check.outputs.url }}
+        run: |
+          # Release の添付ファイルは実体へリダイレクトするため、302 も正常。
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' -I "$URL")
+          case "$CODE" in
+            200|302) echo "配布物を確認: HTTP $CODE $URL" ;;
+            *)
+              echo "::error::配布物が取得できません (HTTP $CODE): $URL"
+              exit 1
+              ;;
+          esac
+
+      - name: beta マニフェストへ反映してコミット
+        env:
+          TOOL: ${{ github.event.inputs.tool }}
+          VERSION: ${{ github.event.inputs.version }}
+          DISPLAY_NAME: ${{ steps.check.outputs.display_name }}
+        run: |
+          # 内容をそのまま写す。両チャネルは同じ配布物を指すため、書き換える
+          # 項目は 1 つも無い。
+          cp "tools/${TOOL}-alpha.json" "tools/${TOOL}.json"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # 差分判定は add 後に --cached で行う。cp が beta マニフェストを
+          # 新規作成した場合は未追跡ファイルになり、git diff --quiet では
+          # 見えず「変更なし」と誤判定してしまう。
+          git add "tools/${TOOL}.json"
+          if git diff --cached --quiet; then
+            echo "beta は既に ${VERSION} です（変更はありません）"
+            exit 0
+          fi
+          git commit -m "${DISPLAY_NAME} ${VERSION} を beta へ昇格"
+          git push

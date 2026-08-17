@@ -17,6 +17,25 @@ Tools that have not been released publicly yet are distributed in encrypted form
 
 ---
 
+## Release channels
+
+There are two channels. **The command above installs the default one, so most people need to do nothing.**
+
+| Channel | Who it is for |
+|---|---|
+| `beta` (default) | Everyone. The version we ask people to use |
+| `alpha` | Lab members helping to test the newest build. Updated often |
+
+To install or update from the alpha channel, run this line instead:
+
+```powershell
+$env:LEELAB_CHANNEL = 'alpha'; irm https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.ps1 | iex
+```
+
+Running the same line again keeps you on the same channel and updates you within it. See the installation guide above for how to move between channels.
+
+---
+
 ## Available tools
 
 | Tool | Description |
@@ -43,8 +62,9 @@ Tools that have not been released publicly yet are distributed in encrypted form
 tools-dist/
 ├── install.ps1        共通インストーラ（利用者はこれを実行する）
 ├── tools/
-│   ├── index.json     配布中のツール一覧（インストーラのメニューの元）
-│   └── <tool>.json    ツールごとのマニフェスト
+│   ├── index.json          配布中のツール一覧（インストーラのメニューの元）
+│   ├── <tool>.json         ツールごとのマニフェスト（beta = 既定チャネル）
+│   └── <tool>-alpha.json   alpha チャネルのマニフェスト
 ├── wheels/            PyPI に無い wheel と、監査済み成果物のミラー
 ├── scripts/           wheel のビルド・ミラーなど、メンテナンス用スクリプト
 ├── tests/             インストーラのテスト（実行しても何もインストールされない）
@@ -53,7 +73,7 @@ tools-dist/
 
 ツール本体の zip は、このリポジトリの **Releases** に置きます。タグ名は `<tool>-v<version>`（例: `valles-v1.0.0`）の形式でツールごとに名前空間を分けます。
 
-> **配布中バージョンの唯一の情報源は `tools/<tool>.json` です。** GitHub の `/releases/latest` は全ツール横断で最新の 1 件を返すため使えません。リリース時のマニフェスト更新はワークフローが自動で行います。
+> **配布中バージョンの唯一の情報源は `tools/<tool>.json`（beta）と `tools/<tool>-alpha.json`（alpha）です。** GitHub の `/releases/latest` は全ツール横断で最新の 1 件を返すため使えません。リリース時のマニフェスト更新はワークフローが自動で行います。beta への昇格は tools-dist の「Promote to beta」ワークフローで行い、**配布物は両チャネルで共有する**ため再ビルドは発生しません。
 
 リリース作業・ツールの追加・パスワードの変更などの手順は [管理者マニュアル](docs/admin-guide.md) を参照してください。
 

@@ -310,6 +310,62 @@ $soloIndex = [pscustomobject] @{
 }
 Check 'single tool auto-selected' ((Select-Tool $soloIndex).name -eq 'solo')
 
+# --- リリースチャネル --------------------------------------------------------
+# 既定は beta で、マニフェストのパスは今までどおり tools/<tool>.json のまま。
+# 素のワンライナー（チャネル指定なし）が beta を入れ続けることが後方互換の要で、
+# ここが変わると既存の利用者全員に影響する。
+Write-Host ''
+Write-Host 'Resolve-Channel / Get-ManifestPath' -ForegroundColor Yellow
+
+# 関数だけを取り出して評価しているため、install.ps1 冒頭の定数は自前で用意する。
+$DefaultChannel = 'beta'
+$KnownChannels  = @('alpha', 'beta')
+
+Check 'empty -> default channel'   ((Resolve-Channel '') -eq 'beta')
+Check 'beta stays beta'            ((Resolve-Channel 'beta') -eq 'beta')
+Check 'alpha is accepted'          ((Resolve-Channel 'alpha') -eq 'alpha')
+Check 'case is normalised'         ((Resolve-Channel 'Alpha') -eq 'alpha')
+Check 'surrounding spaces dropped' ((Resolve-Channel '  alpha  ') -eq 'alpha')
+
+Check 'beta keeps the path as-is'  ((Get-ManifestPath 'tools/valles.json' 'beta') -eq 'tools/valles.json')
+Check 'alpha inserts the suffix'   ((Get-ManifestPath 'tools/valles.json' 'alpha') -eq 'tools/valles-alpha.json')
+Check 'suffix goes before .json'   ((Get-ManifestPath 'tools/a.b/valles.json' 'alpha') -eq 'tools/a.b/valles-alpha.json')
+Check 'no extension -> appended'   ((Get-ManifestPath 'tools/valles' 'alpha') -eq 'tools/valles-alpha')
+
+# index.json の manifest 欄は常に既定チャネルのパスであり、他チャネルはそこから
+# 導く。配布中の全ツールについて、alpha のマニフェストが実在することも見る
+# （無いと alpha を指定した利用者が 404 になる）。
+$toolsDir = Split-Path -Parent $IndexPath
+foreach ($t in $index.tools) {
+    Check "index manifest kept for beta ($($t.name))" `
+        ((Get-ManifestPath $t.manifest 'beta') -eq $t.manifest)
+    $alphaRel = Get-ManifestPath $t.manifest 'alpha'
+    Check "index manifest -> alpha ($($t.name))" `
+        ($alphaRel -eq ($t.manifest -replace '\.json$', '-alpha.json')) $alphaRel
+    Check "alpha manifest exists ($($t.name))" `
+        (Test-Path (Join-Path $toolsDir (Split-Path -Leaf $alphaRel)))
+}
+
+# HTTP 404 の判定。通信を伴わない失敗を 404 と取り違えないこと。
+$notWeb = [pscustomobject] @{ Exception = (New-Object System.Exception 'boom') }
+Check 'non-HTTP failure is not a 404' (-not (Test-NotFoundError $notWeb))
+
+# 環境変数からのチャネル指定と、知らないチャネルの拒否。どちらも install.ps1 の
+# 冒頭（関数の外）で効く処理なので、別プロセスで本体を実行して確かめる。
+# 取得先には存在しない file:// を渡すため、どちらの場合も何もインストールされない。
+$nowhere = 'file:///C:/leelab-does-not-exist'
+
+$env:LEELAB_CHANNEL = 'gamma'
+$badOut = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $InstallerPath -BaseUrl $nowhere 2>&1) -join "`n"
+Check 'unknown channel refuses to run' ($LASTEXITCODE -ne 0)
+Check 'unknown channel is named'       ($badOut -like "*no release channel named 'gamma'*") $badOut
+Check 'valid channels are listed'      ($badOut -like '*alpha, beta*')
+
+$env:LEELAB_CHANNEL = 'alpha'
+$envOut = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $InstallerPath -BaseUrl $nowhere 2>&1) -join "`n"
+Check 'LEELAB_CHANNEL is accepted' ($envOut -notlike '*no release channel named*') $envOut
+Remove-Item Env:\LEELAB_CHANNEL -ErrorAction SilentlyContinue
+
 } finally {
     Remove-Item -Recurse -Force $sandbox -ErrorAction SilentlyContinue
 }
