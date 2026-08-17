@@ -1,6 +1,10 @@
 # 管理者マニュアル
 
-リリース管理を担当する方向けの手順書です。設計の背景は [development-notes.md](development-notes.md) を参照してください。
+リリース管理を担当する方向けの手順書です。tools-dist で配布している全ツール
+（現在は `mmdagent-ex` と `valles`）に共通の、**リリースの最初から最後までの通し手順**を
+扱います。設計の背景は [development-notes.md](development-notes.md) を参照してください。
+
+シークレットやパスワードの**値**は、本書にも他のドキュメントにも書きません（名前だけを扱います）。
 
 ---
 
@@ -12,7 +16,12 @@
         │
         ├─ 配布 zip を作成
         ├─ 暗号化 (.zip.enc) ────────→  Releases  (タグ: <tool>-v1.0.0)
-        └─ マニフェストを更新 ────────→  tools/<tool>.json
+        └─ マニフェストを更新 ────────→  tools/<tool>-alpha.json          ← alpha
+                                          tools/archive/<tool>-v1.0.0.json
+                                              │
+                                              │  Promote to beta（tools-dist の Actions）
+                                              ▼
+                                          tools/<tool>.json                ← beta（既定）
                                               │
                                     利用者 ← install.ps1
 ```
@@ -20,6 +29,24 @@
 - 配布物の実体は **tools-dist の Releases** に置かれます（ツールのリポジトリではありません）
 - 「今どのバージョンを配布中か」の唯一の情報源は **`tools/<tool>.json`**（beta）と **`tools/<tool>-alpha.json`**（alpha）です
 - GitHub の `/releases/latest` は全ツール横断で最新 1 件を返すため、**使わないでください**
+- タグ push で更新されるのは **alpha のマニフェストだけ**です。beta は昇格でしか変わりません
+
+### 誰に何を届けるか
+
+受け取り手は 3 層あり、それぞれ届け方が違います。
+
+| 利用者層 | 受け取り方 | Windows | Quest 3（MMDAgent-EX のみ） |
+|---|---|---|---|
+| **開発者** | ソースからビルド | 各ツールのリポジトリを clone してビルド | 同左（Android ビルド + ADB） |
+| **研究室の共同研究者・実験協力者** | **alpha** チャネル | tools-dist の alpha マニフェスト（ワンライナーに `LEELAB_CHANNEL=alpha`） | Meta Horizon の **ALPHA** リリースチャネル |
+| **一般の利用者（Moonshot プロジェクト）** | **beta** チャネル | tools-dist の beta マニフェスト（素のワンライナー） | Meta Horizon の **BETA** リリースチャネル |
+
+ツールごとの対応プラットフォームは次のとおりです。
+
+| ツール | Windows | Quest 3 | macOS |
+|---|---|---|---|
+| `valles` | ✅（タグ `v*`） | — | — |
+| `mmdagent-ex` | ✅（タグ `v*`） | ✅（タグ `android-v*`、Meta Horizon） | 開発協力者向けのオンデマンド配布（後述） |
 
 ---
 
@@ -38,7 +65,129 @@
 - インストーラは `install.json` にチャネルを記録し、別チャネルを指定して実行されたときは確認を求めます
 - `PAYLOAD_PASSWORD` は当面**チャネル共通**です（alpha 専用のパスワードは設けていません）
 
-### beta へ昇格する
+### 原則: beta へ新規ビルドが直接入る経路は無い
+
+beta に出る版は必ず alpha を通った版で、「alpha で問題が出なかった版を選んで写す」以外の入り方がありません。
+
+- Windows: 昇格は `tools/<tool>-alpha.json` を `tools/<tool>.json` へコピーするだけ。再ビルドも再暗号化も再アップロードも起きません
+- Quest 3: 昇格は Meta のダッシュボードで既存の Alpha ビルドに BETA チャネルを追加割り当てするだけ。APK も versionCode も変わりません
+
+その帰結として、**昇格できるのは「いま alpha に出ている版」だけ**です。過去の版を選んで beta に出す運用は用意していません（古い内容を出したい場合は、それを改めて alpha リリースしてから昇格してください）。
+
+### archive マニフェスト
+
+リリースのたびに、alpha と同じ内容のスナップショットを `tools/archive/<tool>-v<version>.json` にも書き出します。alpha は次の版で上書きされるため、これが無いと過去の版を指すマニフェストが失われます（Release の資産自体は残ります）。1 リリースにつき数百バイトの JSON が 1 個増えるだけです。
+
+---
+
+## 前提（初回のみ）
+
+一度整えれば以後は不要です。担当者が代わったときの確認用に列挙します。
+
+### ツール側リポジトリのシークレット
+
+各ツールのリポジトリの **Settings → Secrets and variables → Actions** に登録します。値は本書には書きません。
+
+| 用途 | シークレット名 |
+|---|---|
+| Windows 配布（全ツール共通） | `TOOLS_DIST_TOKEN`, `PAYLOAD_PASSWORD` |
+| Quest 配布（MMDAgent-EX のみ） | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `META_APP_ID`, `META_APP_SECRET` |
+
+> **組織シークレットは使えません。** GitHub Free プランでは、組織シークレットを private リポジトリから参照できないためです。ツールごとに登録してください。
+
+登録方法と `TOOLS_DIST_TOKEN` の作成条件は「[新しいツールを配布対象に追加する](#新しいツールを配布対象に追加する)」と「[困ったとき](#困ったとき)」にあります。
+
+### Meta Horizon のチャネルとメンバー（MMDAgent-EX のみ）
+
+Meta Horizon Developer Dashboard に **ALPHA** と **BETA** の 2 チャネルがあり、それぞれ独立したメンバーリストを持ちます。
+
+- ALPHA: 共同研究者の Meta アカウントを登録します
+- BETA: 利用者を**メールアドレスで招待**します。既定の上限は **200 人**、申請すれば **2500 人**まで引き上げられます
+- 同じアカウントを両方に入れることもできます。未登録のアカウントには配信されません
+
+初期設定の詳細は MMDAgent-EX リポジトリの `dev/android-cicd.md` を参照してください。
+
+### 配布パスワードの周知
+
+配布物は `PAYLOAD_PASSWORD` で暗号化されており、インストール時に利用者がパスワードを入力します。**このパスワードは公開ドキュメント・リポジトリ・インストール案内の URL には一切書かず、口頭や別の手段で個別に伝えてください。** 公開リポジトリに置いた配布物が「知っている人だけ」の配布として成立するのは、この一点によります。
+
+---
+
+## 新しいバージョンをリリースする（alpha）
+
+タグを push すると alpha チャネルが更新されます。**この操作で beta は変わりません。**
+
+### 通常: `/release-alpha` スキル
+
+各ツールのリポジトリで Claude Code の `/release-alpha` を実行すると、次を一気通貫で行います。
+
+1. 前提チェック（ブランチ・未コミット変更・`gh` 認証・`origin/main` との同期）
+2. 現状の把握（リポジトリ最新タグ / alpha マニフェストのバージョン / 差分コミット）
+3. 次バージョンの決定（コミット要約を見せて対話選択。alpha は既定でパッチ版）
+4. annotated タグの作成と push（push 直前に必ず停止して確認）
+5. CI の監視（失敗時はログ抜粋を出してそこで停止。**タグは勝手に消しません**）
+6. 公開結果の検証（alpha マニフェストと archive スナップショット）
+7. MMDAgent-EX では、Quest 版も出すかを確認し、出すなら `android-vX.Y.Z` タグを push して監視
+8. 完了報告（beta はまだ変わっていないことを明示）
+
+### 同等の手動手順（Windows）
+
+1. 変更を `main` にマージする
+
+2. タグを打って push する
+
+   ```shell
+   git tag -a v1.2.0 -m "<Tool> v1.2.0"
+   git push origin v1.2.0
+   ```
+
+3. GitHub Actions の「リリース公開」ワークフローが完走するのを確認する
+
+   ```shell
+   gh run watch
+   ```
+
+   ワークフローは、配布 zip の作成 → sha256 照合 → openssl で暗号化（復号の往復検証つき）→ tools-dist に Release `<tool>-v<version>` を作成 → `tools/<tool>-alpha.json` と `tools/archive/<tool>-v<version>.json` を更新して commit、の順に進みます。`kind: native`（MMDAgent-EX）では、暗号化の前に Windows ランナーでのビルドとパッケージが入ります。
+
+4. **alpha の**配布中バージョンが更新されたことを確認する
+
+   ```shell
+   curl -s https://raw.githubusercontent.com/lee-lab/tools-dist/main/tools/valles-alpha.json | grep version
+
+   # archive スナップショットが作られているか（200 なら OK）
+   curl -s -o /dev/null -w '%{http_code}\n' \
+       https://raw.githubusercontent.com/lee-lab/tools-dist/main/tools/archive/valles-v1.2.0.json
+   ```
+
+5. alpha の利用者に「更新してください」と伝える（利用者はインストールと同じコマンドを実行するだけです）
+
+> タグ名は `v` + セマンティックバージョン（`v1.2.0`）にしてください。この形式でないとワークフローが起動しません（`V1.2.0` や `1.2.0` は不一致です）。
+> 同じタグでやり直す場合、tools-dist 側の既存 Release は自動的に削除されて作り直されます。
+
+### 同等の手動手順（Quest 3・MMDAgent-EX のみ）
+
+```shell
+git tag -a android-v3.13.0 -m "MMDAgent-EX Quest android-v3.13.0"
+git push origin android-v3.13.0
+```
+
+`android-v*` タグの push で `android-release.yml` が起動し、署名済み APK をビルドして Meta Horizon の **ALPHA** チャネルへアップロードします。あわせて MMDAgent-EX リポジトリの GitHub Release `android-vX.Y.Z` に同じ APK を退避します。
+
+- `versionCode` には GitHub Actions の `run_number` を使います（Meta は同一 versionCode の再アップロードを拒否するため）。この番号が後の BETA 昇格でビルドを識別する鍵になります
+- Windows の `v*` タグでは Android 配信は起動しません。両者は別系統で、バージョン番号を揃えるかどうかは運用の判断です
+- 確認は Meta Horizon Developer Dashboard のビルド一覧で、その versionCode の ALPHA ビルドが現れていることを見ます
+
+---
+
+## beta へ昇格する
+
+alpha で十分に動作確認できた版を、一般の利用者に出す操作です。
+
+### 通常: `/release-beta` スキル
+
+Claude Code で `/release-beta` を実行すると、alpha / beta 両マニフェストの現状を並べて見せ、昇格対象（＝現在の alpha）を確認したうえで tools-dist の昇格ワークフローを実行・監視・検証し、続けて Quest の手動昇格チェックリストを案内します。
+
+### 同等の手動手順（Windows）
 
 1. alpha の版が十分に確かめられたことを確認する
 
@@ -52,41 +201,72 @@
    gh workflow run promote-beta.yml --repo lee-lab/tools-dist -f tool=valles -f version=1.2.0
    ```
 
+   ワークフローは配布物の URL が取得できることを確認してから、`tools/<tool>-alpha.json` を `tools/<tool>.json` へコピーして commit します。
+
 3. `tools/<tool>.json` が更新されたことを確認し、利用者に「更新してください」と伝える
-
-昇格できるのは**いま alpha に出ている版だけ**です。指定したバージョンが alpha のマニフェストと一致しなければワークフローは止まります（過去の版を選んでの昇格は未対応。必要になったら、そのときにワークフローを拡張してください）。
-
-> **暫定的な不整合（対応中）。** ツール側のリリースワークフロー（MMDAgent-EX の `windows-release.yml`、valles の `release.yml`）は、まだ `tools/<tool>.json` を直接更新します。alpha のマニフェストへ書くよう変更するまでの間、ツールをリリースするとその場で **beta が変わります**。後続の対応で解消する短期的な状態です。
-
----
-
-## 新しいバージョンをリリースする
-
-1. 変更を `main` にマージする
-
-2. タグを打って push する
-
-   ```shell
-   git tag v1.2.0
-   git push origin v1.2.0
-   ```
-
-3. GitHub Actions の「リリース公開」ワークフローが完走するのを確認する
-
-   ```shell
-   gh run watch
-   ```
-
-4. 配布中バージョンが更新されたことを確認する
 
    ```shell
    curl -s https://raw.githubusercontent.com/lee-lab/tools-dist/main/tools/valles.json | grep version
    ```
 
-5. 利用者に「更新してください」と伝える（利用者はインストールと同じコマンドを実行するだけです）
+昇格できるのは**いま alpha に出ている版だけ**です。指定したバージョンが alpha のマニフェストと一致しなければワークフローは止まります（過去の版を選んでの昇格は未対応。必要になったら、そのときにワークフローを拡張してください）。
 
-> タグ名は `v` + セマンティックバージョン（`v1.2.0`）にしてください。この形式でないとワークフローが停止します。
-> 同じタグでやり直す場合、既存の Release は自動的に削除されて作り直されます。
+### Quest 3 の昇格（MMDAgent-EX のみ・手動）
+
+**CI では行えません。** Meta Horizon Developer Dashboard での手動操作になります。
+
+1. 昇格対象の versionCode を特定する（MMDAgent-EX リポジトリの Release `android-vX.Y.Z` のアセット名に含まれます）
+
+   ```shell
+   gh release view android-v3.13.0 --repo lee-lab/MMDAgent-EX --json assets --jq '.assets[].name'
+   ```
+
+2. Dashboard のビルド一覧からその versionCode の ALPHA ビルドを選ぶ
+3. リリースチャネルに **BETA** を追加で割り当てる（ALPHA からの移動ではなく追加。再アップロードは不要で APK も versionCode も変わりません）
+4. BETA チャネルのメンバーに対象の利用者が招待済みかを確認する
+5. Dashboard 上で当該ビルドに BETA チャネルが割り当たっていることを確認する
+
+手順の詳細と、CI で自動化しない理由は MMDAgent-EX リポジトリの `dev/android-cicd.md` にあります。
+
+---
+
+## 利用者への案内
+
+### Windows
+
+インストールも更新も**同じ 1 行**です。Windows PowerShell に貼って Enter し、メニューからツールを選び、配布パスワードを入力してもらいます。
+
+```powershell
+# beta（既定）
+irm https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.ps1 | iex
+
+# alpha（実験協力者）
+$env:LEELAB_CHANNEL = "alpha"; irm https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.ps1 | iex
+```
+
+- インストール先は `%LOCALAPPDATA%\LeeLab\<tool>\app`。管理者権限も UAC も不要です
+- **更新は同じコマンドの再実行**です。別チャネルを指定して実行すると、インストーラがチャネル切り替えの確認を求めます
+- アンインストールは Windows の「設定 > アプリ」から行います
+- 更新でアプリのフォルダは丸ごと入れ替わります。引き継がれるのはマニフェストの `preserve` に書かれたものだけです（後述）
+
+手順ページは次の URL を伝えるだけで完結します。パスワードは URL とは**別の手段で**お伝えください。
+
+- 日本語: https://github.com/lee-lab/tools-dist/blob/main/docs/user-guide.ja.md
+- English: https://github.com/lee-lab/tools-dist/blob/main/docs/user-guide.en.md
+
+### Quest 3（MMDAgent-EX のみ）
+
+該当チャネル（ALPHA / BETA）にメンバー登録された Meta アカウントで Quest にサインインしていれば、**Meta Horizon ストア経由で自動更新**されます。管理者から伝えることは「更新が出た」ことだけで、利用者側の特別な操作は要りません。
+
+### macOS（MMDAgent-EX のみの例外運用）
+
+macOS は開発協力者向けの**オンデマンド配布**で、チャネル体制の外にあります。エンドユーザ配布は行いません。
+
+- `/release-upload-mac` スキルで、既存の `vX.Y.Z` タグの GitHub Release に `MMDAgent-EX-vX.Y.Z-macos-arm64.zip` を添付します
+- Windows のリリースは GitHub Release を作らないため、対象タグに Release が無いのが普通です。その場合は**先に Release を作ってから**アセットを上げます
+- Apple Silicon (arm64) のみ、ad-hoc 署名のみ（初回起動は右クリック → 開く）
+
+規定は MMDAgent-EX リポジトリの `CLAUDE.md`（`## Release Packaging`）にあります。
 
 ---
 
@@ -129,6 +309,8 @@
 3. `valles` の `.github/workflows/release.yml` をコピーし、冒頭の `TOOL_NAME` を変更する
 
    `kind: native` では、暗号化より前に**ビルドとパッケージのステップ**が入ります。`lee-lab/MMDAgent-EX` の `.github/workflows/windows-release.yml` が実例です（Windows ランナーでビルドし、そのあとの手順は valles と同じ）。
+
+   > このワークフローが書くのは **alpha のマニフェスト**（`tools/<tool>-alpha.json`）と archive スナップショットだけです。beta（`tools/<tool>.json`）に触れてはいけません。
 
 4. シークレットを 2 つ登録する
 
@@ -257,6 +439,16 @@ git tag v2.0.0 && git push origin v2.0.0
 
 ## 困ったとき
 
+| 症状 | 対処 |
+|---|---|
+| マニフェストを取得したら古いままに見える | `raw.githubusercontent.com` は最大 5 分ほどキャッシュします。失敗と断ずる前に API で実体を見てください: `gh api "repos/lee-lab/tools-dist/contents/tools/<tool>.json" --jq '.content' \| base64 -d` |
+| 昇格ワークフローがバージョンで弾かれる | `version` の先頭に `v` を付けています。`1.2.0` の形で渡してください |
+| 昇格ワークフローが「alpha と一致しない」で止まる | 昇格できるのは現在の alpha だけです。alpha マニフェストの実際の値を取得して渡してください。alpha リリースの CI がまだ完走していない可能性もあります |
+| タグを push したが CI が起動しない | タグ形式がワークフローの `on.push.tags` と一致していません（`v1.2.0` は一致、`V1.2.0` や `1.2.0` は不一致） |
+| リリース CI が失敗した | 原因を直して `main` に push し、**同じタグのまま Actions から `workflow_dispatch` で再実行**してください。push 済みのタグは消さないこと（tools-dist 側に Release が作られている可能性があり、整合の判断が要ります）。どうしてもやり直すならバージョンを上げる方が安全です |
+| Quest のアップロードが `version code already exists`（MMDAgent-EX） | 同一 `run_number` での再実行です。ワークフローを再実行して番号を進めてください |
+| 利用者に新版が見えない（Quest） | そのアカウントが該当チャネルのメンバーに登録されているか確認してください。ALPHA と BETA のメンバーリストは別管理です |
+
 ### ワークフローが 403 で失敗する
 
 `TOOLS_DIST_TOKEN` の有効期限切れがほぼ確実です。fine-grained PAT には期限があり、切れると権限設定の誤りと見分けにくいエラーになります。
@@ -286,11 +478,19 @@ powershell -ExecutionPolicy Bypass -File tests\test-install-flow.ps1
 
 どちらも何もインストールしないため、安全に実行できます。編集時の注意点は [CLAUDE.md](../CLAUDE.md) にまとめてあります。
 
-### 利用者への案内
+### 廃止済みの旧経路（MMDAgent-EX）
 
-インストール手順は次の URL を伝えるだけで完結します。
+かつて `vX.Y.Z` タグの GitHub Release に Windows zip（full / diff バンドル）を添付していた開発者向け配布は**廃止しました**。`v3.12.0` が最後で、過去の Release はアーカイブとしてそのまま残しますが、新しく作らないし更新もしません。共同研究者は alpha チャネルへ移行済みです。**full / diff バンドルの運用を復活させないでください。**
 
-- 日本語: https://github.com/lee-lab/tools-dist/blob/main/docs/user-guide.ja.md
-- English: https://github.com/lee-lab/tools-dist/blob/main/docs/user-guide.en.md
+---
 
-パスワードは URL とは**別の手段で**お伝えください。
+## 関連ドキュメント
+
+| 参照先 | 内容 |
+|---|---|
+| [development-notes.md](development-notes.md) | tools-dist 側の設計の背景・実装メモ |
+| [user-guide.ja.md](user-guide.ja.md) / [user-guide.en.md](user-guide.en.md) | 利用者に渡すインストール手順 |
+| [CLAUDE.md](../CLAUDE.md) | インストーラを編集するときの注意点 |
+| MMDAgent-EX `dev/windows-distribution.md` | Windows 配布の仕組み（ツール側）— 配布物の中身、VC++ ランタイム同梱、欠落 DLL 検査 |
+| MMDAgent-EX `dev/android-cicd.md` | Quest 3 配布の仕組み — Meta 開発組織の初期設定、署名 keystore、versionCode 採番、BETA 昇格 |
+| 各ツールの `CLAUDE.md`（`## Channel Release`） | ツール名・タグ形式・ワークフローファイルの定義。`/release-alpha` と `/release-beta` はここを読んで動きます |
