@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "name": "valles",
+  "display_name": "Valles",
+  "description": "Remote control application for MMDAgent-EX",
+  "version": "1.2.0",
+  "python": "3.12",
+  "package": {
+    "url": "https://github.com/lee-lab/tools-dist/releases/download/valles-v1.2.0/valles-1.2.0.zip.enc",
+    "sha256": "027ce6fed825c8622b80739626d4da065fb36fef14eaa1493d7ac5c8f6abe2c8",
+    "encrypted": true,
+    "kdf_iterations": 200000
+  },
+  "requirements_hashed": [
+    "requirements-pywebrtc.txt"
+  ],
+  "requirements": "requirements.txt",
+  "entry": "main.py",
+  "icon": "valles.ico",
+  "wheels": [
+    "wheels/PyOgg-0.7-py2.py3-none-win_amd64.whl",
+    "wheels/pywebrtc-audio-0.1.0/pywebrtc_audio-0.1.0-cp312-cp312-win_amd64.whl"
+  ],
+  "preserve": [
+    "settings.json",
+    "contents",
+    "valles/s2m/cache"
+  ],
+  "shortcuts": {
+    "desktop": true,
+    "start_menu": true,
+    "console_variant": true
+  },
+  "notes": [
+    "On first launch, please configure the connection settings.",
+    "The first time you use Speech2Motion, a model file (about 120 MB) is downloaded automatically."
+  ]
+}
