@@ -46,7 +46,9 @@
 | ツール | Windows | Quest 3 | macOS |
 |---|---|---|---|
 | `valles` | ✅（タグ `v*`） | — | — |
-| `mmdagent-ex` | ✅（タグ `v*`） | ✅（タグ `android-v*`、Meta Horizon） | 開発協力者向けのオンデマンド配布（後述） |
+| `mmdagent-ex` | ✅（タグ `v*`） | ✅（**同じ** `v*` タグから出荷、Meta Horizon） | 開発協力者向けのオンデマンド配布（後述） |
+
+MMDAgent-EX は 1 本の `vX.Y.Z` タグで Windows と Quest 3 の両方を出荷します。プラットフォームごとに別のタグを打つ必要はありません（旧 `android-v*` タグ運用は廃止しました。過去のタグはアーカイブとして残ります）。
 
 ---
 
@@ -126,9 +128,9 @@ Meta Horizon Developer Dashboard に **ALPHA** と **BETA** の 2 チャネル�
 3. 次バージョンの決定（コミット要約を見せて対話選択。alpha は既定でパッチ版）
 4. annotated タグの作成と push（push 直前に必ず停止して確認）
 5. CI の監視（失敗時はログ抜粋を出してそこで停止。**タグは勝手に消しません**）
-6. 公開結果の検証（alpha マニフェストと archive スナップショット）
-7. MMDAgent-EX では、Quest 版も出すかを確認し、出すなら `android-vX.Y.Z` タグを push して監視
-8. 完了報告（beta はまだ変わっていないことを明示）
+6. 公開結果の検証（alpha マニフェストと archive スナップショット、およびツール側リポジトリの Release `vX.Y.Z` のアセット）
+7. MMDAgent-EX では、同じタグから出た Quest 版の結果（Meta Horizon ALPHA へのアップロードと APK のアーカイブ）を確認
+8. 完了報告（プラットフォームごとの結果を並べ、beta はまだ変わっていないことを明示）
 
 ### 同等の手動手順（Windows）
 
@@ -149,7 +151,7 @@ Meta Horizon Developer Dashboard に **ALPHA** と **BETA** の 2 チャネル�
 
    ワークフローは、配布 zip の作成 → sha256 照合 → openssl で暗号化（復号の往復検証つき）→ tools-dist に Release `<tool>-v<version>` を作成 → `tools/<tool>-alpha.json` と `tools/archive/<tool>-v<version>.json` を更新して commit、の順に進みます。`kind: native`（MMDAgent-EX）では、暗号化の前に Windows ランナーでのビルドとパッケージが入ります。
 
-   あわせて、各ツールのリポジトリ側にも開発者向けの記録として Release `v<version>` が自動作成されます（MMDAgent-EX は平文 zip と自動生成ノート、valles はノートのみ）。自動生成ノートには前タグ以降のマージ済み PR が並ぶため、バージョン間の差分の記録になります。
+   あわせて、各ツールのリポジトリ側にも開発者向けの記録として Release `v<version>` が自動作成されます（MMDAgent-EX は平文 zip と Quest APK と自動生成ノート、valles はノートのみ）。自動生成ノートには前タグ以降のマージ済み PR が並ぶため、バージョン間の差分の記録になります。
 
 4. **alpha の**配布中バージョンが更新されたことを確認する
 
@@ -166,18 +168,20 @@ Meta Horizon Developer Dashboard に **ALPHA** と **BETA** の 2 チャネル�
 > タグ名は `v` + セマンティックバージョン（`v1.2.0`）にしてください。この形式でないとワークフローが起動しません（`V1.2.0` や `1.2.0` は不一致です）。
 > 同じタグでやり直す場合、tools-dist 側の既存 Release は自動的に削除されて作り直されます。
 
-### 同等の手動手順（Quest 3・MMDAgent-EX のみ）
+### Quest 3 も同じタグから出ます（MMDAgent-EX のみ）
 
-```shell
-git tag -a android-v3.13.0 -m "MMDAgent-EX Quest android-v3.13.0"
-git push origin android-v3.13.0
-```
+**Quest 用に別のタグを打つ必要はありません。** 上の `v1.2.0` の push で起動する `release.yml` が、Windows の配布 zip と並行して署名済み APK をビルドし、Meta Horizon の **ALPHA** チャネルへアップロードします。
 
-`android-v*` タグの push で `android-release.yml` が起動し、署名済み APK をビルドして Meta Horizon の **ALPHA** チャネルへアップロードします。あわせて MMDAgent-EX リポジトリの GitHub Release `android-vX.Y.Z` に同じ APK を退避します。
-
-- `versionCode` には GitHub Actions の `run_number` を使います（Meta は同一 versionCode の再アップロードを拒否するため）。この番号が後の BETA 昇格でビルドを識別する鍵になります
-- Windows の `v*` タグでは Android 配信は起動しません。両者は別系統で、バージョン番号を揃えるかどうかは運用の判断です
+- MMDAgent-EX リポジトリの GitHub Release `vX.Y.Z` には、Windows の平文 zip と Quest APK（`MMDAgent-EX-Quest-<version>-versionCode<N>.apk`）が並びます。この `versionCode` が後の BETA 昇格でビルドを識別する鍵になります
+- `versionCode` は単調増加する番号です。値そのものに意味はなく、Meta が同一 versionCode の再アップロードを拒否するための識別子として使います
+- Quest 版のバージョン番号は Windows と常に同一です
 - 確認は Meta Horizon Developer Dashboard のビルド一覧で、その versionCode の ALPHA ビルドが現れていることを見ます
+
+#### アドホックな Quest テストビルド
+
+正式なリリースを伴わずに Quest の実機確認をしたいときは、MMDAgent-EX の Actions から `android-release.yml` を **workflow_dispatch** で手動起動します。Meta Horizon の ALPHA チャネルへ APK を上げるだけで、タグも GitHub Release も作らず、tools-dist のマニフェストにも一切触れません。
+
+> 旧 `android-v*` タグによる Quest リリースは**廃止しました**。過去のタグと Release はアーカイブとしてそのまま残しますが、新しく打たないでください。
 
 ---
 
@@ -217,11 +221,13 @@ Claude Code で `/release-beta` を実行すると、alpha / beta 両マニフ�
 
 **CI では行えません。** Meta Horizon Developer Dashboard での手動操作になります。
 
-1. 昇格対象の versionCode を特定する（MMDAgent-EX リポジトリの Release `android-vX.Y.Z` のアセット名に含まれます）
+1. 昇格対象の versionCode を特定する（MMDAgent-EX リポジトリの Release `vX.Y.Z` のアセット名に含まれます。Windows zip と同じ Release に APK が同居しています）
 
    ```shell
-   gh release view android-v3.13.0 --repo lee-lab/MMDAgent-EX --json assets --jq '.assets[].name'
+   gh release view v3.13.0 --repo lee-lab/MMDAgent-EX --json assets --jq '.assets[].name'
    ```
+
+   APK が見当たらない場合、その版は Windows のみが出荷されています。Quest 側は前のビルドが ALPHA / BETA に残ったままなので、Quest も新しくしたい場合は Quest ビルドを含む版を改めて alpha リリースしてください。
 
 2. Dashboard のビルド一覧からその versionCode の ALPHA ビルドを選ぶ
 3. リリースチャネルに **BETA** を追加で割り当てる（ALPHA からの移動ではなく追加。再アップロードは不要で APK も versionCode も変わりません）
@@ -310,7 +316,7 @@ macOS は開発協力者向けの**オンデマンド配布**で、チャネル�
 
 3. `valles` の `.github/workflows/release.yml` をコピーし、冒頭の `TOOL_NAME` を変更する
 
-   `kind: native` では、暗号化より前に**ビルドとパッケージのステップ**が入ります。`lee-lab/MMDAgent-EX` の `.github/workflows/windows-release.yml` が実例です（Windows ランナーでビルドし、そのあとの手順は valles と同じ）。
+   `kind: native` では、暗号化より前に**ビルドとパッケージのステップ**が入ります。`lee-lab/MMDAgent-EX` の `.github/workflows/release.yml` が実例です（Windows ランナーでビルドし、そのあとの手順は valles と同じ。同じワークフローが Quest 用の Android ジョブも並行して回します）。
 
    > このワークフローが書くのは **alpha のマニフェスト**（`tools/<tool>-alpha.json`）と archive スナップショットだけです。beta（`tools/<tool>.json`）に触れてはいけません。
 
@@ -448,7 +454,7 @@ git tag v2.0.0 && git push origin v2.0.0
 | 昇格ワークフローが「alpha と一致しない」で止まる | 昇格できるのは現在の alpha だけです。alpha マニフェストの実際の値を取得して渡してください。alpha リリースの CI がまだ完走していない可能性もあります |
 | タグを push したが CI が起動しない | タグ形式がワークフローの `on.push.tags` と一致していません（`v1.2.0` は一致、`V1.2.0` や `1.2.0` は不一致） |
 | リリース CI が失敗した | 原因を直して `main` に push し、**同じタグのまま Actions から `workflow_dispatch` で再実行**してください。push 済みのタグは消さないこと（tools-dist 側に Release が作られている可能性があり、整合の判断が要ります）。どうしてもやり直すならバージョンを上げる方が安全です |
-| Quest のアップロードが `version code already exists`（MMDAgent-EX） | 同一 `run_number` での再実行です。ワークフローを再実行して番号を進めてください |
+| Quest のアップロードが `version code already exists`（MMDAgent-EX） | 同一 versionCode での再アップロードです。ワークフローを再実行して番号を進めてください |
 | 利用者に新版が見えない（Quest） | そのアカウントが該当チャネルのメンバーに登録されているか確認してください。ALPHA と BETA のメンバーリストは別管理です |
 
 ### ワークフローが 403 で失敗する
