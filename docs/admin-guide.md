@@ -104,10 +104,25 @@ beta に出る版は必ず alpha を通った版で、「alpha で問題が出�
 Meta Horizon Developer Dashboard に **ALPHA** と **BETA** の 2 チャネルがあり、それぞれ独立したメンバーリストを持ちます。
 
 - ALPHA: 共同研究者の Meta アカウントを登録します
-- BETA: 利用者を**メールアドレスで招待**します。既定の上限は **200 人**、申請すれば **2500 人**まで引き上げられます
+- BETA: 利用者を**メールアドレスで招待**するか、後述の**参加用リンク**で参加してもらいます。既定の上限は **200 人**、申請すれば **2500 人**まで引き上げられます
 - 同じアカウントを両方に入れることもできます。未登録のアカウントには配信されません
 
 初期設定の詳細は MMDAgent-EX リポジトリの `dev/android-cicd.md` を参照してください。
+
+### Quest チャネルの参加用リンク（MMDAgent-EX のみ）
+
+メールアドレスを 1 件ずつ登録する代わりに、**リンクを開いてもらうだけで参加できる URL** を発行できます。Developer Dashboard のチャネル設定にある **「Grant access to users by URL」** を有効にすると、そのチャネル専用の `https://www.meta.com/s/...` が得られます。利用者はリンクを開き、ヘッドセットにサインインしているのと同じ Meta アカウントでサインインするだけです。
+
+| チャネル | 参加の扱い | 管理者の作業 |
+|---|---|---|
+| ALPHA（実験協力者） | クリックした時点で参加完了 | なし（自動承認） |
+| BETA（一般の利用者） | クリックは**参加リクエスト** | Dashboard で 1 件ずつ承認します |
+
+BETA を手動承認にしているのは、一般公開前の配布物が意図しない相手に届かないようにするためです。**承認待ちのリクエストは Dashboard を見に行かないと分かりません。** 利用者に案内したあとは、しばらく Dashboard を確認してください。
+
+- **リンクは発行から 90 日で失効します。** そのチャネルに新しいビルドを上げると期限が延びるため、リリース頻度の高い ALPHA は実質失効しません。**BETA は昇格が続かないと失効します**。失効したら Dashboard で再発行してください
+- **現行の URL の唯一の情報源は site-doc のインストールページ**（`content.ja/getting-started/install.md` と `content.en/getting-started/install.md` の Meta Quest 3 節）です。URL がローテートしたら **site-doc だけを直してください**
+- マニフェストの `notes` には URL 自体を書かず、**インストールページを指す 1 行だけ**を置いています。beta 昇格でマニフェストは alpha から丸ごと写されるため `notes` はチャネル中立でなければならず、また URL が変わるたびにマニフェストを触りたくないためです
 
 ### 配布パスワードの周知
 
@@ -266,6 +281,11 @@ $env:LEELAB_CHANNEL = "alpha"; irm https://raw.githubusercontent.com/lee-lab/too
 ### Quest 3（MMDAgent-EX のみ）
 
 該当チャネル（ALPHA / BETA）にメンバー登録された Meta アカウントで Quest にサインインしていれば、**Meta Horizon ストア経由で自動更新**されます。管理者から伝えることは「更新が出た」ことだけで、利用者側の特別な操作は要りません。
+
+まだチャネルに入っていない利用者には、[参加用リンク](#quest-チャネルの参加用リンクmmdagent-ex-のみ)を案内します。リンクそのものは伝えず、**手順ページの URL だけ**を伝えれば足ります（対象別の参加用リンクがページ内にあります）。
+
+- 日本語: https://mmdagent-ex-doc.netlify.app/ja/getting-started/install/
+- English: https://mmdagent-ex-doc.netlify.app/getting-started/install/
 
 ### macOS（MMDAgent-EX のみの例外運用）
 

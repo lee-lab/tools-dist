@@ -19,6 +19,7 @@
   "notes": [
     "On first launch, enter the event code you received to download the content.",
     "The content is saved in the MMDAgent-Contents folder on your desktop. It is kept when you update.",
-    "About 700 MB of free disk space is needed."
+    "About 700 MB of free disk space is needed.",
+    "A Meta Quest 3 version is also available. To join the release channel, see the Meta Quest 3 section of https://mmdagent-ex-doc.netlify.app/getting-started/install/"
   ]
 }
