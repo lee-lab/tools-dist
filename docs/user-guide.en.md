@@ -41,7 +41,30 @@ If a newer version is available, it is installed. Your settings and any download
 
 ---
 
-## 3. About the password
+## 3. Release channels
+
+There are two channels. **Unless you were told otherwise, use the default one — the command above already does.**
+
+| Channel | Who it is for |
+|---|---|
+| `beta` (default) | Everyone. The version we ask people to use |
+| `alpha` | Lab members helping to test the newest build. Updated often |
+
+To install or update from the alpha channel, run this line instead:
+
+```powershell
+$env:LEELAB_CHANNEL = 'alpha'; irm https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.ps1 | iex
+```
+
+Running a line again updates you **within the channel you are on**: the plain line keeps you on beta, the alpha line keeps you on alpha.
+
+To move to the other channel, simply run the line for that channel. The installer shows which channel you are on now, and asks you to confirm before it replaces what you have. Your settings and downloaded data are kept, as with a normal update.
+
+The two channels have different version numbers, so moving from alpha to beta can install an older version. That is expected.
+
+---
+
+## 4. About the password
 
 - This tool has not been released publicly, so only people with the password can install it.
 - **Please do not share the password with anyone outside the project.**
@@ -49,13 +72,13 @@ If a newer version is available, it is installed. Your settings and any download
 
 ---
 
-## 4. Uninstall
+## 5. Uninstall
 
 Open Windows **Settings > Apps > Installed apps**, find the tool by name, and uninstall it.
 
 ---
 
-## 5. If something goes wrong
+## 6. If something goes wrong
 
 **The app does not start, or the window disappears immediately**
 
@@ -81,7 +104,7 @@ You need 64-bit Windows 10 or 11. Windows on ARM is not supported.
 
 ---
 
-## 6. Disk space
+## 7. Disk space
 
 The first installation uses about **4.5 GB**. Around 2.2 GB of that is a cache kept to make future updates fast.
 
