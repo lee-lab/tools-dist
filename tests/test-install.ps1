@@ -99,6 +99,35 @@ Check 'json null -> default' ((Get-Prop $obj 'c' 'def') -eq 'def')
 Check 'zero is preserved'    ((Get-Prop $obj 'n' 99) -eq 0)
 Check 'null object'          ((Get-Prop $null 'a' 'def') -eq 'def')
 
+# --- Get-SmartAppControlState -----------------------------------------------
+# Smart App Control は新品の Windows 11 で既定有効で、未署名の DLL を
+# 0xC0E90002 で弾く。除外設定が無いため案内を出すことしかできないが、その
+# 判定を誤ると「無効なのに警告が出る」「有効なのに黙る」ことになる。
+# 本物の HKLM は書き換えられないので、HKCU に偽のキーを作って確かめる。
+Write-Host ''
+Write-Host 'Get-SmartAppControlState' -ForegroundColor Yellow
+
+$fakeCi = 'HKCU:\Software\LeeLabTest\CIPolicy'
+$missingCi = 'HKCU:\Software\LeeLabTest\no-such-key-' + [System.IO.Path]::GetRandomFileName()
+try {
+    Check 'missing key -> off' ((Get-SmartAppControlState $missingCi) -eq 'off')
+
+    New-Item -Path $fakeCi -Force | Out-Null
+    Check 'key without the value -> off' ((Get-SmartAppControlState $fakeCi) -eq 'off')
+
+    New-ItemProperty -Path $fakeCi -Name 'VerifiedAndReputablePolicyState' `
+        -Value 1 -PropertyType DWord -Force | Out-Null
+    Check '1 -> on' ((Get-SmartAppControlState $fakeCi) -eq 'on')
+
+    Set-ItemProperty -Path $fakeCi -Name 'VerifiedAndReputablePolicyState' -Value 2
+    Check '2 -> evaluation' ((Get-SmartAppControlState $fakeCi) -eq 'evaluation')
+
+    Set-ItemProperty -Path $fakeCi -Name 'VerifiedAndReputablePolicyState' -Value 0
+    Check '0 -> off' ((Get-SmartAppControlState $fakeCi) -eq 'off')
+} finally {
+    Remove-Item -Path 'HKCU:\Software\LeeLabTest' -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 # --- Expand-Package ---------------------------------------------------------
 Write-Host ''
 Write-Host 'Expand-Package' -ForegroundColor Yellow

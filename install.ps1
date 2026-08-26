@@ -194,6 +194,54 @@ function Test-Environment {
 }
 
 # ---------------------------------------------------------------------------
+# Smart App Control detection
+#
+# Smart App Control (SAC) ships enabled on new Windows 11 machines. It blocks
+# executables and DLLs that are not digitally signed and have no reputation
+# yet, with status 0xC0E90002. There is no per-application allowlist, so all we
+# can do is report it; the only remedy is for the user to turn SAC off.
+#
+# The state lives in HKLM\SYSTEM\CurrentControlSet\Control\CI\Policy, in the
+# DWORD value VerifiedAndReputablePolicyState:
+#     1 = on (enforcing)   2 = evaluation (not blocking)   0 = off
+# The key or the value may be missing (Windows 10, older builds); that means
+# SAC is not in play. This only ever reads the registry, never writes it, so no
+# administrator rights are needed.
+# ---------------------------------------------------------------------------
+
+function Get-SmartAppControlState([string] $RegPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy') {
+    try {
+        $key = Get-ItemProperty -Path $RegPath -ErrorAction Stop
+        $value = Get-Prop $key 'VerifiedAndReputablePolicyState' $null
+        if ($null -eq $value) { return 'off' }
+        $state = [int] $value
+        if ($state -eq 1) { return 'on' }
+        if ($state -eq 2) { return 'evaluation' }
+        return 'off'
+    } catch {
+        # A missing key, a value we cannot read, or a value that is not a number
+        # all mean the same thing here: nothing is blocking us.
+        return 'off'
+    }
+}
+
+# Shown once the install has finished, but only when SAC is actually enforcing.
+# Evaluation mode does not block anything, so saying nothing is correct there.
+function Show-SmartAppControlWarning {
+    if ((Get-SmartAppControlState) -ne 'on') { return }
+    Write-Host ''
+    Write-Warn 'Windows "Smart App Control" is turned on on this PC.'
+    Write-Host '  It may block parts of this tool, because they are not digitally' -ForegroundColor Yellow
+    Write-Host '  signed. If the tool shows an error that mentions a .dll file' -ForegroundColor Yellow
+    Write-Host '  when it starts, do this:' -ForegroundColor Yellow
+    Write-Host '    1. Open Windows Security, then "App & browser control",' -ForegroundColor Yellow
+    Write-Host '       then "Smart App Control settings"' -ForegroundColor Yellow
+    Write-Host '    2. Turn Smart App Control off' -ForegroundColor Yellow
+    Write-Host '    3. Start the tool again' -ForegroundColor Yellow
+    Write-Host '  If you are not sure what to do, please contact the developer.' -ForegroundColor DarkGray
+}
+
+# ---------------------------------------------------------------------------
 # Downloading
 # ---------------------------------------------------------------------------
 
@@ -1024,6 +1072,8 @@ function Install-Tool($Entry) {
     } else {
         Write-Host "  You can start it from the Start menu: $Publisher > $displayName." -ForegroundColor White
     }
+
+    Show-SmartAppControlWarning
 
     $notes = @(Get-Prop $m 'notes' @())
     if ($notes.Count -gt 0) {

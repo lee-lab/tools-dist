@@ -496,6 +496,18 @@ git tag v2.0.0 && git push origin v2.0.0
 2. `PAYLOAD_PASSWORD` を変更した後にリリースしたか確認する（変更前のリリースには古いパスワードが必要）
 3. 利用者が最新のパスワードを持っているか確認する
 
+### 利用者から「DLL がブロックされた・0xC0E90002 エラーが出る」と言われた
+
+新品の Windows 11 で既定有効の **Smart App Control (SAC)** が、未署名の exe / DLL を弾いています。エラー状態 `0xC0E90002` が典型で、MMDAgent-EX では `Plugin_Walk.dll` などで出ます。SAC は一度でも無効化・評価終了した機体では二度と有効にならず、開発者のマシンは大抵評価モードで自動オフになっているため、**手元では再現しません**。
+
+SAC にはアプリ単位の除外がありません。利用者側の対処は SAC をオフにすることだけです。
+
+> Windows セキュリティ > アプリとブラウザー コントロール > スマート アプリ コントロール > オフ
+
+インストーラは SAC が有効な機体でだけ、インストール完了時に英語の案内を表示します（`install.ps1` の `Get-SmartAppControlState` / `Show-SmartAppControlWarning`）。MMDAgent-EX のマニフェストの `notes` にも同じ内容が入っています。
+
+恒久対策は**コード署名**です。個人名義の証明書でも構いません。署名しても評価が付くまでは弾かれ得るので、リリース直後は [Microsoft Security Intelligence](https://www.microsoft.com/en-us/wdsi/filesubmission) へのファイル提出（`Software developer` → `I want to validate a file`）で評価付けを前倒しできます。
+
 ### インストーラを変更した
 
 **必ず Windows 実機でテストを通してください。** 静的な構文チェックでは検出できない不具合が多数あります。
