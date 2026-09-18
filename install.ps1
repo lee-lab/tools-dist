@@ -718,6 +718,47 @@ function Register-Uninstall {
     }
 }
 
+function Write-LaunchScript {
+    # Writes launch.vbs, which starts a Python tool without a console window.
+    #
+    # The pythonw.exe that uv puts into a virtual environment is not the real
+    # GUI interpreter but a small launcher that hands over to it, and that
+    # launcher is a console program (the same binary as python.exe). Started
+    # from a shortcut it therefore opens an empty console window first, which
+    # people read as "nothing happened". Starting it through this script with
+    # the window style hidden avoids that. The diagnostic shortcut keeps using
+    # python.exe directly, because there the console is the point.
+    param(
+        [string] $ToolRoot,
+        [string] $DisplayName,
+        [string] $Python,
+        [string] $Arguments,
+        [string] $WorkingDirectory
+    )
+    # VBScript doubles a quote to embed it in a string literal.
+    $q = '"'
+    $qq = '""'
+    $pythonLit = $Python.Replace($q, $qq)
+    $workLit = $WorkingDirectory.Replace($q, $qq)
+    $argsLit = $Arguments.Replace($q, $qq)
+    $content = @"
+' Starts $DisplayName without showing a console window.
+' This file was generated automatically by the installer. Do not edit.
+Option Explicit
+Dim shell
+Set shell = CreateObject("WScript.Shell")
+' settings and caches are saved relative to the current directory
+shell.CurrentDirectory = "$workLit"
+shell.Run """$pythonLit"" $argsLit", 0, False
+"@
+    $path = Join-Path $ToolRoot 'launch.vbs'
+    # UTF-16 with a BOM: the install path may contain characters outside the
+    # system code page (a user name, for instance), and that is the encoding
+    # Windows Script Host reads reliably.
+    [System.IO.File]::WriteAllText($path, $content, [System.Text.Encoding]::Unicode)
+    return $path
+}
+
 function Write-UninstallScript {
     param(
         [string] $Name,
@@ -998,14 +1039,23 @@ function Install-Tool($Entry) {
             Fail "$exeName is missing from the package. Please contact the developer."
         }
         $launchArgs = Get-Prop $m 'args' ''
+        $consoleArgs = ''
         # A native tool usually carries its own icon, so fall back to the
         # executable when the manifest does not name an icon file.
         if (-not $iconPath) { $iconPath = $launchTarget }
     } else {
-        $launchArgs = Get-Prop $m 'entry' 'main.py'
+        $entryScript = Get-Prop $m 'entry' 'main.py'
         $consoleTarget = $venvPython
-        $launchTarget = Join-Path $venvDir 'Scripts\pythonw.exe'
-        if (-not (Test-Path $launchTarget)) { $launchTarget = $venvPython }
+        $consoleArgs = $entryScript
+        $pythonw = Join-Path $venvDir 'Scripts\pythonw.exe'
+        if (-not (Test-Path $pythonw)) { $pythonw = $venvPython }
+        # The normal shortcut goes through launch.vbs rather than straight to
+        # pythonw.exe, so that no console window flashes up (see
+        # Write-LaunchScript). //B keeps Windows Script Host itself quiet.
+        $launchScript = Write-LaunchScript -ToolRoot $toolRoot -DisplayName $displayName `
+            -Python $pythonw -Arguments $entryScript -WorkingDirectory $appDir
+        $launchTarget = Join-Path $env:SystemRoot 'System32\wscript.exe'
+        $launchArgs = "//B //Nologo `"$launchScript`""
     }
 
     $shortcutOpts = Get-Prop $m 'shortcuts'
@@ -1034,7 +1084,7 @@ function Install-Tool($Entry) {
     if ($wantConsole) {
         # For troubleshooting: keeps the console open so errors stay readable.
         $p = Join-Path $startMenuDir "$displayName (Diagnostic Mode).lnk"
-        New-Shortcut -Path $p -Target $consoleTarget -Arguments $launchArgs `
+        New-Shortcut -Path $p -Target $consoleTarget -Arguments $consoleArgs `
             -WorkingDirectory $appDir -IconPath $iconPath `
             -Description "Starts $displayName with a console window so error messages are visible"
         [void] $createdShortcuts.Add($p)

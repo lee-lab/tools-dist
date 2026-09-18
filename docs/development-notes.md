@@ -105,7 +105,9 @@ Valles は `settings.json`・`contents/`・s2m のモデルキャッシュを、
 
 ### ショートカットを 2 種類作る
 
-通常起動は `pythonw.exe`（コンソールを表示しない）ですが、それだけだとエラーが利用者から見えません。スタートメニューに `python.exe` を使う「(Diagnostic Mode)」を併設し、不具合時にエラーメッセージを読めるようにしています。
+通常起動はコンソールを表示しませんが、それだけだとエラーが利用者から見えません。スタートメニューに `python.exe` を使う「(Diagnostic Mode)」を併設し、不具合時にエラーメッセージを読めるようにしています。
+
+通常起動のショートカットは `.venv\Scripts\pythonw.exe` を直接指さず、インストーラが書き出す `launch.vbs` を `wscript.exe //B` で呼びます（tools-dist#9）。uv が venv に置く `pythonw.exe` は `python.exe` と同一バイナリの**コンソール版**中継ランチャーで、ショートカットから直接起動すると空のコンソール窓（Windows Terminal ならブランクのタブ）が先に開くためです。`launch.vbs` は `WScript.Shell.Run` の窓スタイル 0 で pythonw を隠して起動し、作業フォルダをアプリのフォルダに合わせます。インストール先に非 ASCII 文字が含まれても壊れないよう、UTF-16（BOM 付き）で書き出します。
 
 ### 配布物の暗号化
 
