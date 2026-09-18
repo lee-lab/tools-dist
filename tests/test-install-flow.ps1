@@ -189,7 +189,19 @@ Check 'shortcut count honours manifest' (@($script:Shortcuts).Count -eq 2)
 Check 'no desktop shortcut'   (@($script:Shortcuts | Where-Object { $_.Path -like '*Desktop*' }).Count -eq 0)
 Check 'console variant made'  (@($script:Shortcuts | Where-Object { $_.Path -like '*Diagnostic Mode*' }).Count -eq 1)
 $main = $script:Shortcuts | Where-Object { $_.Path -notlike '*Diagnostic Mode*' } | Select-Object -First 1
-Check 'shortcut targets pythonw' ($main.Target -like '*pythonw.exe')
+# 通常起動は wscript.exe //B launch.vbs 経由（uv の venv の pythonw.exe はコンソール版
+# ランチャーなので、直接ショートカットにすると空のコンソール窓が開く。tools-dist#9）
+$launchVbs = Join-Path $toolRoot 'launch.vbs'
+Check 'shortcut targets wscript' ($main.Target -like '*\wscript.exe')
+Check 'shortcut args run launch.vbs hidden' ($main.Arguments -eq ('//B //Nologo "' + $launchVbs + '"'))
+Check 'launch.vbs written'        (Test-Path $launchVbs)
+$vbs = [System.IO.File]::ReadAllText($launchVbs, [System.Text.Encoding]::Unicode)
+$expectedRun = 'shell.Run """' + (Join-Path $toolRoot '.venv\Scripts\pythonw.exe') + '"" main.py", 0, False'
+Check 'launch.vbs starts pythonw hidden' ($vbs.Contains($expectedRun))
+Check 'launch.vbs sets workdir'   ($vbs.Contains('shell.CurrentDirectory = "' + $appDir + '"'))
+$diag = $script:Shortcuts | Where-Object { $_.Path -like '*Diagnostic Mode*' } | Select-Object -First 1
+Check 'diagnostic targets python.exe' ($diag.Target -like '*\python.exe')
+Check 'diagnostic runs entry directly' ($diag.Arguments -eq 'main.py')
 Check 'shortcut workdir is app'  ($main.WorkingDirectory -eq $appDir)
 Check 'shortcut uses icon'       ($main.IconPath -eq (Join-Path $appDir 'flowtest.ico'))
 
