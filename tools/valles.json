@@ -3,11 +3,11 @@
   "name": "valles",
   "display_name": "Valles",
   "description": "Remote control application for MMDAgent-EX",
-  "version": "1.9.2",
+  "version": "1.9.3",
   "python": "3.12",
   "package": {
-    "url": "https://github.com/lee-lab/tools-dist/releases/download/valles-v1.9.2/valles-1.9.2.zip.enc",
-    "sha256": "933e0536fde89f2bd023d8f01e042009510feb0aa26cabf9ae51d0f176153a3e",
+    "url": "https://github.com/lee-lab/tools-dist/releases/download/valles-v1.9.3/valles-1.9.3.zip.enc",
+    "sha256": "15d59aebd4cff16a8b67cbe46f03c2195043fe6b49eca48c81106db94a3d19b9",
     "encrypted": true,
     "kdf_iterations": 200000
   },
