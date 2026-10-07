@@ -29,6 +29,8 @@ Windows 10 / 11（64bit）で動作します。**Python などを事前に用意
 
 ---
 
+**VS Code 拡張（MMDAgent-EX）。** Visual Studio Code が入っていて、ターミナルで `code` コマンドが使える場合は、MMDAgent-EX のスクリプト編集を助ける拡張も自動で入ります。使えない場合は `code --install-extension "...\mmdagent-ex-lua.vsix"` のようなコマンドが表示されるので、VS Code を入れたあとにそのコマンドを実行してください。
+
 ## 2. 更新
 
 **インストールと同じコマンドを、もう一度実行してください。**

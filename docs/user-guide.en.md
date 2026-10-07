@@ -27,6 +27,8 @@ Installation takes a few minutes. Please do not close the window before it finis
 
 ---
 
+**VS Code extension (MMDAgent-EX).** If Visual Studio Code is installed and its `code` command works in a terminal, the installer also adds the extension that helps you edit MMDAgent-EX scripts. If not, the installer shows a command like `code --install-extension "...\mmdagent-ex-lua.vsix"`; after installing VS Code, run that command to add it.
+
 ## 2. Update
 
 **Run exactly the same command again.**

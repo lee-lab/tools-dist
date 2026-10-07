@@ -90,6 +90,16 @@ function Register-Uninstall {
     $script:Registered = [pscustomobject] @{ Name = $Name; Version = $Version; ToolRoot = $ToolRoot }
 }
 
+# VS Code の CLI は見つかったことにし、呼び出しは記録するだけにする。
+# uv は Invoke-Uv ごと差し替えているので、ここに来るのは code の呼び出しだけ。
+$script:CodeCli = 'C:\stub\code.cmd'
+$script:CodeCalls = New-Object System.Collections.ArrayList
+function Find-VsCodeCli { return $script:CodeCli }
+function Invoke-Native([string] $Exe, [string[]] $NativeArgs) {
+    [void] $script:CodeCalls.Add([pscustomobject] @{ Exe = $Exe; Args = @($NativeArgs) })
+    $global:LASTEXITCODE = 0
+}
+
 try {
 
 # --- 配布物を用意する（暗号化あり）------------------------------------------
@@ -175,6 +185,7 @@ Check 'archive root stripped'  (-not (Test-Path (Join-Path $appDir 'flowtest-1.2
 Check 'state file written'     (Test-Path (Join-Path $toolRoot 'install.json'))
 Check 'uninstaller written'    (Test-Path (Join-Path $toolRoot 'uninstall.ps1'))
 Check 'registered as 1.2.3'    ($null -ne $script:Registered -and $script:Registered.Version -eq '1.2.3')
+Check 'no vscode_extensions -> code not called' (@($script:CodeCalls).Count -eq 0)
 
 # 注意: Where-Object の結果に直接 .Count を使わないこと。結果が 1 件だけのとき、
 # PSCustomObject では PSObject のプロパティ探索が優先されて .Count が取れない。
@@ -382,6 +393,8 @@ New-Item -ItemType Directory -Force -Path (Join-Path $nativeSrc 'AppData') | Out
 Set-Content -Path (Join-Path $nativeSrc 'FlowNative.exe')     -Value 'stub executable'
 Set-Content -Path (Join-Path $nativeSrc 'FlowNative.mdf')     -Value 'stub config'
 Set-Content -Path (Join-Path $nativeSrc 'AppData\data.bin')   -Value 'stub data'
+New-Item -ItemType Directory -Force -Path (Join-Path $nativeSrc 'extensions') | Out-Null
+Set-Content -Path (Join-Path $nativeSrc 'extensions\flow.vsix') -Value 'stub extension'
 # 配布物は単一の親フォルダで包まない形（複数ルート）。実際の MMDAgent-EX の
 # 配布 zip と同じ構造にしておく。
 $nativeZip = Join-Path $sandbox 'flownative-2.0.0.zip'
@@ -397,6 +410,12 @@ $nativeManifest = [ordered] @{
     }
     exe = 'FlowNative.exe'
     shortcuts = [ordered] @{ desktop = $true; start_menu = $true; console_variant = $true }
+    # 1 件目は配布物に入っている。2 件目は入っていない（古い配布物の想定）ので
+    # 案内を出して飛ばし、code は呼ばれないこと。
+    vscode_extensions = @(
+        [ordered] @{ file = 'extensions/flow.vsix';    id = 'LeeLab.flow' },
+        [ordered] @{ file = 'extensions/missing.vsix'; id = 'LeeLab.missing' }
+    )
 }
 $nativeManifest | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $distDir 'tools\flownative.json') -Encoding UTF8
 $nativeEntry = [pscustomobject] @{ name = 'flownative'; display_name = 'Flow Native'; manifest = 'tools/flownative.json' }
@@ -409,6 +428,14 @@ $nativeApp  = Join-Path $nativeRoot 'app'
 Check 'native exe extracted'      (Test-Path (Join-Path $nativeApp 'FlowNative.exe'))
 Check 'native subdir extracted'   (Test-Path (Join-Path $nativeApp 'AppData\data.bin'))
 Check 'native skips uv entirely'  (@($script:UvCalls).Count -eq 0)
+$codeCall = @($script:CodeCalls)
+$vsixPath = Join-Path $nativeApp 'extensions\flow.vsix'
+Check 'code called once (missing vsix skipped)' ($codeCall.Count -eq 1) ("calls: " + $codeCall.Count)
+Check 'code stub used'            ($codeCall.Count -ge 1 -and $codeCall[0].Exe -eq 'C:\stub\code.cmd')
+Check 'code install arguments'    ($codeCall.Count -ge 1 -and (($codeCall[0].Args -join '|') -eq "--install-extension|$vsixPath|--force")) `
+    ($(if ($codeCall.Count -ge 1) { $codeCall[0].Args -join '|' }))
+$nativeUninst = [System.IO.File]::ReadAllText((Join-Path (Join-Path $InstallRoot 'flownative') 'uninstall.ps1'), [System.Text.Encoding]::UTF8)
+Check 'uninstall removes the extension' ($nativeUninst -like "*'LeeLab.flow'*")
 Check 'no venv created'           (-not (Test-Path (Join-Path $nativeRoot '.venv')))
 Check 'native registered as 2.0.0' ($script:Registered.Version -eq '2.0.0')
 

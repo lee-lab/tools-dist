@@ -365,6 +365,7 @@ macOS は開発協力者向けの**オンデマンド配布**で、チャネル�
    | `preserve` | **更新時に引き継ぐファイル・フォルダ**（後述） |
    | `shortcuts` | `desktop` / `start_menu` / `console_variant` の可否 |
    | `notes` | インストール完了時に表示する補足（**英語で**） |
+   | `vscode_extensions` | 配布物に同梱した VS Code 拡張（`.vsix`）の一覧（任意、後述） |
 
    `kind: python` のみ:
 
@@ -409,6 +410,21 @@ Valles の例:
 設定ファイル、ダウンロードしたモデル、キャッシュなどが対象です。
 
 ユーザデータを**インストール先の外**に書くツールでは、`preserve` は空のままで構いません。MMDAgent-EX がこの例で、コンテンツも設定もデスクトップの `MMDAgent-Contents` フォルダに置かれるため、アプリのフォルダが丸ごと入れ替わっても失われません。「空でよい」ことを確認した根拠は、ツール側のコードで確かめてから決めてください。
+
+### `vscode_extensions`（同梱の VS Code 拡張）
+
+Marketplace に出していない拡張を配布物に入れて、インストール時に入れさせるための項目です。
+
+```json
+"vscode_extensions": [
+  { "file": "extensions/mmdagent-ex-lua.vsix", "id": "MMDAgent-EX.mmdagent-ex-lua" }
+]
+```
+
+- `file` はアプリのフォルダからの相対パス、`id` は拡張の `<publisher>.<name>`
+- インストーラは展開とショートカット作成のあと、`code` コマンド（VS Code の CLI）が PATH にあれば `code --install-extension <絶対パス> --force` を実行します
+- `code` が無い・失敗した・`file` が配布物に無い、のいずれでも**インストールは失敗させません**。`code` が無い・失敗したときは手動で入れるコマンドを表示し、`file` が配布物に無いときは「この版には含まれていない」と表示して先へ進みます。そのため、`.vsix` を同梱する前の版でマニフェストに書いておいても害はありません
+- アンインストール時は、`code` があれば列挙した `id` を `code --uninstall-extension` で外します
 
 ### `requirements_hashed`（監査済み依存のハッシュ検証）
 
