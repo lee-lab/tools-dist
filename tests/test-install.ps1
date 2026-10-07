@@ -297,9 +297,27 @@ Check 'no code -> not called'         ($script:NativeCalls.Count -eq 0)
 Check 'no code -> manual command'     ($manual.Count -eq 1)
 Invoke-Expression $nativeFuncText   # Invoke-Native を元に戻す
 
-# 見つからないときは $null（Find-VsCodeCli は PATH 上の code を探すだけ）
-$cli = Find-VsCodeCli
-Check 'Find-VsCodeCli returns a path or null' (($null -eq $cli) -or (Test-Path $cli))
+# PATH を差し替えて code.cmd の探索を確かめる。拡張子の無い code（code.cmd の隣の
+# シェルスクリプト）や Code.exe は CLI ではないので拾わない
+$cliRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("tools-dist-cli-" + [guid]::NewGuid().ToString('N'))
+$cliBin  = Join-Path $cliRoot 'VS Code\bin'
+$cliApp  = Join-Path $cliRoot 'VS Code'
+New-Item -ItemType Directory -Force -Path $cliBin | Out-Null
+Set-Content -Path (Join-Path $cliBin 'code') -Value '#!/bin/sh' -Encoding Ascii
+Set-Content -Path (Join-Path $cliApp 'Code.exe') -Value '' -Encoding Ascii
+$savedPath = $env:PATH
+try {
+    $env:PATH = "$cliApp;$cliBin"
+    Check 'Find-VsCodeCli ignores an extension-less code and Code.exe' ($null -eq (Find-VsCodeCli))
+    Set-Content -Path (Join-Path $cliBin 'code.cmd') -Value '@echo off' -Encoding Ascii
+    Check 'Find-VsCodeCli returns code.cmd' ((Find-VsCodeCli) -eq (Join-Path $cliBin 'code.cmd'))
+    function code { 'alias-like function' }
+    Check 'Find-VsCodeCli ignores a function named code' ((Find-VsCodeCli) -eq (Join-Path $cliBin 'code.cmd'))
+    Remove-Item Function:\code
+} finally {
+    $env:PATH = $savedPath
+    Remove-Item -Recurse -Force $cliRoot
+}
 
 # --- Unprotect-OpenSslFile --------------------------------------------------
 # 配布物の暗号化は CI 側 (openssl) とインストーラ側 (.NET) で別実装になるため、

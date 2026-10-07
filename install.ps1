@@ -542,15 +542,15 @@ function Invoke-Uv([string] $UvExe, [string[]] $UvArgs, [string] $FailMessage) {
 
 # Path of VS Code's command line launcher, or $null when VS Code is not on PATH.
 # On Windows this resolves to "code.cmd".
-# Only real programs count (not a profile alias or function named "code"), and
-# the launcher "code.cmd" is preferred over "Code.exe" in case the install
-# folder itself is on PATH.
+# Only the launcher "code.cmd" counts: a profile alias or function named "code"
+# is not a program, "Code.exe" is not the command line interface, and an
+# extension-less "code" (a shell script next to code.cmd) cannot be run from
+# PowerShell at all (it neither fails nor sets an exit code).
 function Find-VsCodeCli {
-    foreach ($name in @('code.cmd', 'code')) {
-        $cmd = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($null -ne $cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source)) { return $cmd.Source }
-    }
-    return $null
+    $cmd = Get-Command 'code.cmd' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $cmd -or [string]::IsNullOrWhiteSpace($cmd.Source)) { return $null }
+    if (-not $cmd.Source.EndsWith('.cmd', [System.StringComparison]::OrdinalIgnoreCase)) { return $null }
+    return $cmd.Source
 }
 
 # Resolve the "vscode_extensions" entries of a manifest against the app folder.
@@ -591,6 +591,8 @@ function Install-VsCodeExtensions($Manifest, [string] $AppDir, [string] $CodeCli
             continue
         }
         Write-Step "Installing the VS Code extension $label"
+        # A launcher that never runs leaves $LASTEXITCODE untouched; make that a failure.
+        $global:LASTEXITCODE = -1
         $output = Invoke-Native $CodeCli @('--install-extension', $x.Path, '--force')
         if ($LASTEXITCODE -eq 0) {
             Write-Ok "Installed the VS Code extension $label"
@@ -871,7 +873,7 @@ foreach (`$s in `$shortcuts) {
     if (`$s -and (Test-Path `$s)) { Remove-Item -Force `$s }
 }
 if (`$vscodeExtensions.Count -gt 0) {
-    `$code = Get-Command code -ErrorAction SilentlyContinue | Select-Object -First 1
+    `$code = Get-Command 'code.cmd' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (`$code) {
         foreach (`$x in `$vscodeExtensions) {
             & `$code.Source --uninstall-extension `$x 2>&1 | Out-Null
@@ -1172,8 +1174,9 @@ function Install-Tool($Entry) {
     Write-Ok "Created shortcuts ($($createdShortcuts.Count) item(s))"
 
     # --- VS Code extensions (optional) ---------------------------------------
-    # Every declared id goes to the uninstaller, so an extension installed by an
-    # earlier version is removed even if this version no longer ships it.
+    # Every declared id goes to the uninstaller (also for a missing file), so an
+    # extension installed by an earlier version of the package is removed as
+    # long as the manifest still lists it.
     $vscodeIds = @(Get-VsCodeExtensionPlan $m $appDir | ForEach-Object { $_.Id })
     $vscodeManual = @()
     if (@(Get-Prop $m 'vscode_extensions' @()).Count -gt 0) {
