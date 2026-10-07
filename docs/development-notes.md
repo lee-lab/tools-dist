@@ -135,7 +135,7 @@ Valles の音声処理コア（valles#67）が依存する `pywebrtc-audio` は�
 
 ### 同梱 VS Code 拡張は失敗させない
 
-マニフェストの `vscode_extensions` に挙げた `.vsix` は、PATH 上の `code`（Windows では `code.cmd`）で `--install-extension --force` する。エディタ支援は本体の動作に不要なので、`code` が無い・失敗した・配布物に `.vsix` が無い、のいずれでもインストールは続行し、手動のコマンドを表示するだけにしている。アンインストール時は `code` があれば `--uninstall-extension` で外す（失敗は無視）。
+マニフェストの `vscode_extensions` に挙げた `.vsix` は、PATH 上の `code`（Windows では `code.cmd`）で `--install-extension --force` する。エディタ支援は本体の動作に不要なので、`code` が無い・失敗したときは手動のコマンドを表示し、配布物に `.vsix` が無いときは含まれていない旨を表示して、いずれもインストールは続行する。アンインストール時は `code` があれば `--uninstall-extension` で外す（失敗は無視）。
 
 ### 表示言語
 

@@ -542,10 +542,15 @@ function Invoke-Uv([string] $UvExe, [string[]] $UvArgs, [string] $FailMessage) {
 
 # Path of VS Code's command line launcher, or $null when VS Code is not on PATH.
 # On Windows this resolves to "code.cmd".
+# Only real programs count (not a profile alias or function named "code"), and
+# the launcher "code.cmd" is preferred over "Code.exe" in case the install
+# folder itself is on PATH.
 function Find-VsCodeCli {
-    $cmd = Get-Command code -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $cmd) { return $null }
-    return $cmd.Source
+    foreach ($name in @('code.cmd', 'code')) {
+        $cmd = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source)) { return $cmd.Source }
+    }
+    return $null
 }
 
 # Resolve the "vscode_extensions" entries of a manifest against the app folder.
