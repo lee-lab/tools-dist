@@ -537,6 +537,68 @@ function Invoke-Uv([string] $UvExe, [string[]] $UvArgs, [string] $FailMessage) {
 }
 
 # ---------------------------------------------------------------------------
+# VS Code extensions shipped inside the package (optional manifest field)
+# ---------------------------------------------------------------------------
+
+# Path of VS Code's command line launcher, or $null when VS Code is not on PATH.
+# On Windows this resolves to "code.cmd".
+function Find-VsCodeCli {
+    $cmd = Get-Command code -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $cmd) { return $null }
+    return $cmd.Source
+}
+
+# Resolve the "vscode_extensions" entries of a manifest against the app folder.
+# Returns one object per entry: Id, Path (absolute) and Exists.
+function Get-VsCodeExtensionPlan($Manifest, [string] $AppDir) {
+    $plan = New-Object System.Collections.ArrayList
+    foreach ($e in @(Get-Prop $Manifest 'vscode_extensions' @())) {
+        $file = [string] (Get-Prop $e 'file' '')
+        $id   = [string] (Get-Prop $e 'id' '')
+        if ([string]::IsNullOrWhiteSpace($file)) { continue }
+        $path = [System.IO.Path]::GetFullPath((Join-Path $AppDir $file))
+        [void] $plan.Add([pscustomobject] @{
+            Id     = $id
+            Path   = $path
+            Exists = (Test-Path -LiteralPath $path -PathType Leaf)
+        })
+    }
+    return @($plan)
+}
+
+# Install each shipped extension with VS Code's CLI. Never fails the
+# installation: problems are reported and the manual command is shown.
+# Returns the manual commands the user still has to run (for the summary).
+function Install-VsCodeExtensions($Manifest, [string] $AppDir, [string] $CodeCli) {
+    $manual = New-Object System.Collections.ArrayList
+    foreach ($x in @(Get-VsCodeExtensionPlan $Manifest $AppDir)) {
+        $label = $x.Id
+        if ([string]::IsNullOrWhiteSpace($label)) { $label = [System.IO.Path]::GetFileName($x.Path) }
+        if (-not $x.Exists) {
+            Write-Host "  This version does not include the VS Code extension $label (skipped)." -ForegroundColor DarkGray
+            continue
+        }
+        $command = "code --install-extension `"$($x.Path)`""
+        if ([string]::IsNullOrWhiteSpace($CodeCli)) {
+            Write-Host '  To get editor support for scripts, install Visual Studio Code and run:' -ForegroundColor DarkGray
+            Write-Host "      $command" -ForegroundColor DarkGray
+            [void] $manual.Add($command)
+            continue
+        }
+        Write-Step "Installing the VS Code extension $label"
+        $output = Invoke-Native $CodeCli @('--install-extension', $x.Path, '--force')
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "Installed the VS Code extension $label"
+        } else {
+            $output | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+            Write-Warn "Could not install the VS Code extension $label. You can install it later by running: $command"
+            [void] $manual.Add($command)
+        }
+    }
+    return @($manual)
+}
+
+# ---------------------------------------------------------------------------
 # Shortcuts
 # ---------------------------------------------------------------------------
 
@@ -764,9 +826,11 @@ function Write-UninstallScript {
         [string] $Name,
         [string] $DisplayName,
         [string] $ToolRoot,
-        [string[]] $ShortcutPaths
+        [string[]] $ShortcutPaths,
+        [string[]] $VsCodeExtensionIds = @()
     )
     $shortcutList = ($ShortcutPaths | ForEach-Object { "    '" + $_.Replace("'", "''") + "'" }) -join ",`n"
+    $extensionList = (@($VsCodeExtensionIds | Where-Object { $_ }) | ForEach-Object { "    '" + $_.Replace("'", "''") + "'" }) -join ",`n"
     $content = @"
 # Uninstalls $DisplayName.
 # This file was generated automatically by the installer.
@@ -781,6 +845,9 @@ param([switch] `$Yes)
 `$toolRoot = '$($ToolRoot.Replace("'", "''"))'
 `$shortcuts = @(
 $shortcutList
+)
+`$vscodeExtensions = @(
+$extensionList
 )
 
 Write-Host ''
@@ -797,6 +864,14 @@ if (-not `$Yes) {
 
 foreach (`$s in `$shortcuts) {
     if (`$s -and (Test-Path `$s)) { Remove-Item -Force `$s }
+}
+if (`$vscodeExtensions.Count -gt 0) {
+    `$code = Get-Command code -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (`$code) {
+        foreach (`$x in `$vscodeExtensions) {
+            & `$code.Source --uninstall-extension `$x 2>&1 | Out-Null
+        }
+    }
 }
 Remove-Item -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LeeLab-$Name' -Recurse -Force
 
@@ -1091,6 +1166,15 @@ function Install-Tool($Entry) {
     }
     Write-Ok "Created shortcuts ($($createdShortcuts.Count) item(s))"
 
+    # --- VS Code extensions (optional) ---------------------------------------
+    # Every declared id goes to the uninstaller, so an extension installed by an
+    # earlier version is removed even if this version no longer ships it.
+    $vscodeIds = @(Get-VsCodeExtensionPlan $m $appDir | ForEach-Object { $_.Id })
+    $vscodeManual = @()
+    if (@(Get-Prop $m 'vscode_extensions' @()).Count -gt 0) {
+        $vscodeManual = @(Install-VsCodeExtensions -Manifest $m -AppDir $appDir -CodeCli (Find-VsCodeCli))
+    }
+
     # --- Record the state --------------------------------------------------
     $state = [ordered] @{
         name         = $name
@@ -1109,7 +1193,7 @@ function Install-Tool($Entry) {
     $state | ConvertTo-Json -Depth 5 | Set-Content -Path $stateFile -Encoding UTF8
 
     Write-UninstallScript -Name $name -DisplayName $displayName -ToolRoot $toolRoot `
-        -ShortcutPaths @($createdShortcuts)
+        -ShortcutPaths @($createdShortcuts) -VsCodeExtensionIds $vscodeIds
     Register-Uninstall -Name $name -DisplayName $displayName -Version $version `
         -ToolRoot $toolRoot -IconPath $iconPath
 
@@ -1121,6 +1205,12 @@ function Install-Tool($Entry) {
         Write-Host "  You can start it from the `"$displayName`" icon on your desktop." -ForegroundColor White
     } else {
         Write-Host "  You can start it from the Start menu: $Publisher > $displayName." -ForegroundColor White
+    }
+
+    if ($vscodeManual.Count -gt 0) {
+        Write-Host ''
+        Write-Host '  For editor support in Visual Studio Code, run:' -ForegroundColor White
+        foreach ($c in $vscodeManual) { Write-Host "      $c" -ForegroundColor White }
     }
 
     Show-SmartAppControlWarning

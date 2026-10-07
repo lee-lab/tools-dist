@@ -238,6 +238,68 @@ Write-UninstallScript -Name 'x' -DisplayName 'X' -ToolRoot $toolRoot2 -ShortcutP
 $ue2 = $null
 [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $toolRoot2 'uninstall.ps1'), [ref]$null, [ref]$ue2) | Out-Null
 Check 'no shortcuts -> still valid' ($ue2.Count -eq 0)
+Check 'no extensions -> empty list' ((Get-Content -Raw (Join-Path $toolRoot2 'uninstall.ps1')) -match '\$vscodeExtensions = @\(\s*\)')
+
+# VS Code 拡張の ID が渡されたら、アンインストール時に code で外すこと
+$toolRoot3 = Join-Path $sandbox 'toolroot3'
+New-Item -ItemType Directory -Force -Path $toolRoot3 | Out-Null
+Write-UninstallScript -Name 'm' -DisplayName 'M' -ToolRoot $toolRoot3 -ShortcutPaths @() -VsCodeExtensionIds @('Pub.ext-a', 'Pub.ext-b')
+$ue3 = $null
+[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $toolRoot3 'uninstall.ps1'), [ref]$null, [ref]$ue3) | Out-Null
+Check 'extensions -> still valid' ($ue3.Count -eq 0)
+$text3 = Get-Content -Raw (Join-Path $toolRoot3 'uninstall.ps1')
+Check 'extension ids listed'       (($text3 -like "*'Pub.ext-a'*") -and ($text3 -like "*'Pub.ext-b'*"))
+Check 'uninstall-extension called' ($text3 -like '*--uninstall-extension*')
+
+# --- VS Code 拡張 (vscode_extensions) ---------------------------------------
+Write-Host ''
+Write-Host 'VS Code extensions' -ForegroundColor Yellow
+
+$extApp = Join-Path $sandbox 'extapp'
+New-Item -ItemType Directory -Force -Path (Join-Path $extApp 'extensions') | Out-Null
+Set-Content -Path (Join-Path $extApp 'extensions\a.vsix') -Value 'stub'
+$extManifest = [pscustomobject] @{
+    vscode_extensions = @(
+        [pscustomobject] @{ file = 'extensions/a.vsix'; id = 'Pub.a' },
+        [pscustomobject] @{ file = 'extensions/gone.vsix'; id = 'Pub.gone' }
+    )
+}
+
+$plan = @(Get-VsCodeExtensionPlan $extManifest $extApp)
+Check 'plan has both entries'   ($plan.Count -eq 2)
+Check 'plan path is absolute'   ($plan[0].Path -eq (Join-Path $extApp 'extensions\a.vsix')) $plan[0].Path
+Check 'shipped file exists'     ($plan[0].Exists -and $plan[0].Id -eq 'Pub.a')
+Check 'missing file detected'   (-not $plan[1].Exists)
+Check 'field absent -> no plan' (@(Get-VsCodeExtensionPlan ([pscustomobject] @{ name = 'x' }) $extApp).Count -eq 0)
+
+# code の呼び出しは記録だけする。終了コードは $script:FakeExit で切り替える。
+$nativeFuncText = @($funcs | Where-Object { $_.Name -eq 'Invoke-Native' })[0].Extent.Text
+$script:NativeCalls = New-Object System.Collections.ArrayList
+$script:FakeExit = 0
+function Invoke-Native([string] $Exe, [string[]] $NativeArgs) {
+    [void] $script:NativeCalls.Add([pscustomobject] @{ Exe = $Exe; Args = @($NativeArgs) })
+    $global:LASTEXITCODE = $script:FakeExit
+    return 'stub output'
+}
+
+$manual = @(Install-VsCodeExtensions -Manifest $extManifest -AppDir $extApp -CodeCli 'C:\stub\code.cmd' 6>$null)
+Check 'code called for shipped file only' ($script:NativeCalls.Count -eq 1)
+Check 'install arguments' (($script:NativeCalls[0].Args -join '|') -eq ('--install-extension|' + (Join-Path $extApp 'extensions\a.vsix') + '|--force'))
+Check 'success -> nothing left to do' ($manual.Count -eq 0)
+
+$script:NativeCalls.Clear(); $script:FakeExit = 1
+$manual = @(Install-VsCodeExtensions -Manifest $extManifest -AppDir $extApp -CodeCli 'C:\stub\code.cmd' 6>$null)
+Check 'failure does not throw, manual command returned' ($manual.Count -eq 1 -and $manual[0] -like 'code --install-extension*a.vsix*')
+
+$script:NativeCalls.Clear()
+$manual = @(Install-VsCodeExtensions -Manifest $extManifest -AppDir $extApp -CodeCli '' 6>$null)
+Check 'no code -> not called'         ($script:NativeCalls.Count -eq 0)
+Check 'no code -> manual command'     ($manual.Count -eq 1)
+Invoke-Expression $nativeFuncText   # Invoke-Native を元に戻す
+
+# 見つからないときは $null（Find-VsCodeCli は PATH 上の code を探すだけ）
+$cli = Find-VsCodeCli
+Check 'Find-VsCodeCli returns a path or null' (($null -eq $cli) -or (Test-Path $cli))
 
 # --- Unprotect-OpenSslFile --------------------------------------------------
 # 配布物の暗号化は CI 側 (openssl) とインストーラ側 (.NET) で別実装になるため、

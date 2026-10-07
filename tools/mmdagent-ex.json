@@ -12,6 +12,9 @@
     "kdf_iterations": 200000
   },
   "exe": "MMDAgent-EX.exe",
+  "vscode_extensions": [
+    { "file": "extensions/mmdagent-ex-lua.vsix", "id": "MMDAgent-EX.mmdagent-ex-lua" }
+  ],
   "shortcuts": {
     "desktop": true,
     "start_menu": true
