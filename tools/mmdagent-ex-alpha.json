@@ -4,10 +4,10 @@
   "display_name": "MMDAgent-EX",
   "description": "Voice interaction platform with 3D CG characters",
   "kind": "native",
-  "version": "3.20.1",
+  "version": "3.20.2",
   "package": {
-    "url": "https://github.com/lee-lab/tools-dist/releases/download/mmdagent-ex-v3.20.1/MMDAgent-EX-3.20.1.zip.enc",
-    "sha256": "4a33cd19bf4c40ff65e440f705d1940fd24a3c60d5564dbaa354bb73ec5b2165",
+    "url": "https://github.com/lee-lab/tools-dist/releases/download/mmdagent-ex-v3.20.2/MMDAgent-EX-3.20.2.zip.enc",
+    "sha256": "d59028c8abdb56886a2f423f8eff2a14504206a035fbae23b2be8e65ca38dd64",
     "encrypted": true,
     "kdf_iterations": 200000
   },
