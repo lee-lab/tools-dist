@@ -4,6 +4,8 @@ English version: [user-guide.en.md](user-guide.en.md)
 
 Windows 10 / 11（64bit）で動作します。**Python などを事前に用意する必要はありません。**
 
+Apple Silicon の Mac では [8. macOS（Apple Silicon）](#8-macosapple-silicon) をご覧ください。1〜7 は Windows の手順です。
+
 ---
 
 ## 1. インストール
@@ -117,6 +119,75 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```powershell
 & "$env:USERPROFILE\.local\bin\uv.exe" cache clean
 ```
+
+---
+
+## 8. macOS（Apple Silicon）
+
+一部のツールには macOS 版があります（現在は **MMDAgent-EX**）。インストーラには macOS 版のあるツールだけが表示されます。
+
+**動作条件:** Apple Silicon（M1 以降）の Mac で、**macOS 15 以降**。Intel Mac には対応していません。事前に入れておくものはなく、管理者権限も要りません。
+
+### インストール
+
+1. **ターミナル**を開きます（Finder > アプリケーション > ユーティリティ > ターミナル。Spotlight で「ターミナル」と検索しても開けます）。
+
+2. 次の 1 行をコピーして貼り付け、Return キーを押します。
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.sh | bash
+   ```
+
+3. パスワードを聞かれたら、担当者からお伝えしたパスワードを入力します。
+   入力中は画面に文字が表示されませんが、正しく入力されています。
+
+4. `was installed successfully.` と表示されたら完了です。
+
+アプリは**ホームフォルダの「アプリケーション」フォルダ**（`~/Applications`。Finder で 移動 > ホーム を選び、「アプリケーション」を開く）に置かれます。Spotlight（Command + Space）でも探せます。
+
+> **画面表示は英語です。** 日本語話者以外の利用者にも同じ手順で使っていただくためです。
+
+### 初回起動
+
+ほかのアプリと同じように開いてください。**セキュリティの警告は通常出ません。** インストーラが自分でファイルを取得するため、macOS は「インターネットからダウンロードしたもの」として扱いません。
+
+それでも「開けません」「壊れているため開けません」と表示された場合は、**システム設定 > プライバシーとセキュリティ** を開いて下へスクロールし、そのアプリについての表示の横にある **「このまま開く」** を押してください。解決しない場合は、表示された文言をそのまま担当者にお知らせください。
+
+### 更新
+
+**インストールと同じコマンドを、もう一度実行してください。** コンテンツはそのまま引き継がれます。
+
+### リリースチャネル
+
+Windows と同じく、何も付けないコマンドは既定の `beta` チャネルです。`alpha` チャネルを使う場合は、`|` の後ろ、`bash` の直前に `LEELAB_CHANNEL=alpha` を付けます。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.sh | LEELAB_CHANNEL=alpha bash
+```
+
+同じコマンドを再実行すると、そのチャネルの中で更新されます。もう一方のチャネルのコマンドを実行すると、切り替えてよいか確認を求めます。
+
+選んだチャネルにまだそのツールの macOS 版が無い場合は、その旨を表示して何も変更せずに終了します。
+
+### アンインストール
+
+ターミナルで次を実行します。
+
+```bash
+~/Library/Application\ Support/LeeLab/mmdagent-ex/uninstall.sh
+```
+
+アプリ本体、「アプリケーション」フォルダの項目、インストーラが入れた VS Code 拡張を削除します。**ホームフォルダの `MMDAgent-Contents` フォルダ（`~/MMDAgent-Contents`）にあるコンテンツは削除されません。**
+
+### ファイルの置き場所
+
+| もの | 場所 |
+|---|---|
+| アプリ本体 | `~/Library/Application Support/LeeLab/mmdagent-ex/` |
+| 起動に使うアイコン | `~/Applications/MMDAgent-EX.app` |
+| コンテンツ（MMDAgent-EX） | `~/MMDAgent-Contents`。更新でもアンインストールでも残ります |
+
+**VS Code 拡張（MMDAgent-EX）。** Visual Studio Code が入っていれば、配布物に拡張が含まれている場合はそれも自動で入ります。入っていない場合は、あとで実行する `code --install-extension ...` のコマンドが表示されます。
 
 ---
 

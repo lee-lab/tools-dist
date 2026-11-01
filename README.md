@@ -1,14 +1,22 @@
 # Lee Lab Tools
 
-Easy installation of Lee Lab tools on Windows 10 / 11 (64-bit).
+Easy installation of Lee Lab tools on **Windows 10 / 11 (64-bit)** and on **macOS (Apple Silicon)**.
 
-**You do not need to install Python.** The installer sets up everything for you.
+**You do not need to install Python or anything else first.** The installer sets up everything for you. Administrator rights are not required.
+
+**Windows** — open **Windows PowerShell** from the Start menu, paste this line, and press Enter:
 
 ```powershell
 irm https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.ps1 | iex
 ```
 
-Open **Windows PowerShell** from the Start menu, paste the line above, and press Enter. Administrator rights are not required.
+**macOS (Apple Silicon, macOS 15 or later)** — open **Terminal**, paste this line, and press Return:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.sh | bash
+```
+
+Only tools that have a macOS version are offered on a Mac (currently MMDAgent-EX).
 
 > **Full instructions — please read this first:**
 > **[Installation Guide (English)](docs/user-guide.en.md)** ・ **[インストール手順（日本語）](docs/user-guide.ja.md)**
@@ -30,6 +38,12 @@ To install or update from the alpha channel, run this line instead:
 
 ```powershell
 $env:LEELAB_CHANNEL = 'alpha'; irm https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.ps1 | iex
+```
+
+On macOS, put `LEELAB_CHANNEL=alpha` right before `bash` (after the `|`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.sh | LEELAB_CHANNEL=alpha bash
 ```
 
 Running the same line again keeps you on the same channel and updates you within it. See the installation guide above for how to move between channels.
@@ -60,7 +74,8 @@ Running the same line again keeps you on the same channel and updates you within
 
 ```
 tools-dist/
-├── install.ps1        共通インストーラ（利用者はこれを実行する）
+├── install.ps1        共通インストーラ（Windows。利用者はこれを実行する）
+├── install.sh         共通インストーラ（macOS / Apple Silicon）
 ├── tools/
 │   ├── index.json          配布中のツール一覧（インストーラのメニューの元）
 │   ├── <tool>.json         ツールごとのマニフェスト（beta = 既定チャネル）
@@ -68,6 +83,9 @@ tools-dist/
 ├── wheels/            PyPI に無い wheel と、監査済み成果物のミラー
 ├── scripts/           wheel のビルド・ミラーなど、メンテナンス用スクリプト
 ├── tests/             インストーラのテスト（実行しても何もインストールされない）
+│   ├── test-install.ps1        install.ps1 の単体テスト（Windows）
+│   ├── test-install-flow.ps1   install.ps1 の通しの配線検証（Windows）
+│   └── test-install.sh         install.sh の単体テストと通しの流れ（macOS）
 └── docs/              各種ドキュメント
 ```
 
@@ -83,10 +101,16 @@ tools-dist/
 - **利用者に表示するメッセージは英語で書くこと。** 利用者に英語母語話者が含まれるため
 - **Windows PowerShell 5.1 の構文で書くこと。** 利用者の環境に PowerShell 7 があるとは限りません
 - **変更したら Windows 実機でテストを通すこと。** 静的な構文チェックでは検出できない不具合が多数あります
+- **macOS の `install.sh` は bash 3.2（macOS 標準）の構文・純 ASCII・LF で書くこと。** 利用者の Mac に新しい bash や python3 があるとは限りません（python3 は初回に Xcode コマンドラインツールの導入ダイアログを出すため使いません）
+- **`install.sh` は `curl | bash` で実行され、stdin はスクリプト本体です。** 質問とパスワードは必ず `/dev/tty` から読み、外部コマンドの stdin は `/dev/null` に向けること。変更したら Apple Silicon の実機で `tests/test-install.sh` を通すこと（`curl | bash` の経路、ファイル実行の経路、更新の経路をすべて走らせます）
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests\test-install.ps1
 powershell -ExecutionPolicy Bypass -File tests\test-install-flow.ps1
+```
+
+```bash
+bash tests/test-install.sh
 ```
 
 詳細と、過去に踏んだ具体的な罠は [CLAUDE.md](CLAUDE.md) にまとめてあります。
