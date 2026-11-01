@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "name": "mmdagent-ex",
+  "display_name": "MMDAgent-EX",
+  "description": "Voice interaction platform with 3D CG characters",
+  "kind": "native",
+  "version": "3.20.1",
+  "package": {
+    "url": "https://github.com/lee-lab/tools-dist/releases/download/mmdagent-ex-v3.20.1/MMDAgent-EX-3.20.1.zip.enc",
+    "sha256": "4a33cd19bf4c40ff65e440f705d1940fd24a3c60d5564dbaa354bb73ec5b2165",
+    "encrypted": true,
+    "kdf_iterations": 200000
+  },
+  "exe": "MMDAgent-EX.exe",
+  "vscode_extensions": [
+    {
+      "file": "extensions/mmdagent-ex-lua.vsix",
+      "id": "MMDAgent-EX.mmdagent-ex-lua"
+    }
+  ],
+  "shortcuts": {
+    "desktop": true,
+    "start_menu": true
+  },
+  "notes": [
+    "On first launch, enter the event code you received to download the content.",
+    "The content is saved in the MMDAgent-Contents folder on your desktop. It is kept when you update.",
+    "About 700 MB of free disk space is needed.",
+    "A Meta Quest 3 version is also available. To join the release channel, see the Meta Quest 3 section of https://mmdagent-ex-doc.netlify.app/getting-started/install/",
+    "If Windows blocks a .dll file at startup (error 0xC0E90002), turn off Smart App Control: Windows Security > App & browser control > Smart App Control settings > Off, then start the app again."
+  ]
+}
