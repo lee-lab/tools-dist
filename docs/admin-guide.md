@@ -23,7 +23,7 @@
                                               ▼
                                           tools/<tool>.json                ← beta（既定）
                                               │
-                                    利用者 ← install.ps1
+                              利用者 ← install.ps1（Windows） / install.sh（macOS）
 ```
 
 - 配布物の実体は **tools-dist の Releases** に置かれます（ツールのリポジトリではありません）
@@ -38,17 +38,17 @@
 | 利用者層 | 受け取り方 | Windows | Quest 3（MMDAgent-EX のみ） |
 |---|---|---|---|
 | **開発者** | ソースからビルド | 各ツールのリポジトリを clone してビルド | 同左（Android ビルド + ADB） |
-| **研究室の共同研究者・実験協力者** | **alpha** チャネル | tools-dist の alpha マニフェスト（ワンライナーに `LEELAB_CHANNEL=alpha`） | Meta Horizon の **ALPHA** リリースチャネル |
-| **一般の利用者（Moonshot プロジェクト）** | **beta** チャネル | tools-dist の beta マニフェスト（素のワンライナー） | Meta Horizon の **BETA** リリースチャネル |
+| **研究室の共同研究者・実験協力者** | **alpha** チャネル | tools-dist の alpha マニフェスト（ワンライナーに `LEELAB_CHANNEL=alpha`。macOS も同じ） | Meta Horizon の **ALPHA** リリースチャネル |
+| **一般の利用者（Moonshot プロジェクト）** | **beta** チャネル | tools-dist の beta マニフェスト（素のワンライナー。macOS も同じ） | Meta Horizon の **BETA** リリースチャネル |
 
 ツールごとの対応プラットフォームは次のとおりです。
 
 | ツール | Windows | Quest 3 | macOS |
 |---|---|---|---|
 | `valles` | ✅（タグ `v*`） | — | — |
-| `mmdagent-ex` | ✅（タグ `v*`） | ✅（**同じ** `v*` タグから出荷、Meta Horizon） | 開発協力者向けのオンデマンド配布（後述） |
+| `mmdagent-ex` | ✅（タグ `v*`） | ✅（**同じ** `v*` タグから出荷、Meta Horizon） | ✅ Apple Silicon（**同じ** `v*` タグから出荷。alpha / beta はマニフェストの `platforms` で Windows と一緒に動く） |
 
-MMDAgent-EX は 1 本の `vX.Y.Z` タグで Windows と Quest 3 の両方を出荷します。プラットフォームごとに別のタグを打つ必要はありません（旧 `android-v*` タグ運用は廃止しました。過去のタグはアーカイブとして残ります）。
+MMDAgent-EX は 1 本の `vX.Y.Z` タグで Windows・macOS・Quest 3 を出荷します。プラットフォームごとに別のタグを打つ必要はありません（旧 `android-v*` タグ運用は廃止しました。過去のタグはアーカイブとして残ります）。
 
 ---
 
@@ -167,7 +167,7 @@ BETA でリンクを使わないのは、リンクの参加リクエストでは
 
    ワークフローは、配布 zip の作成 → sha256 照合 → openssl で暗号化（復号の往復検証つき）→ tools-dist に Release `<tool>-v<version>` を作成 → `tools/<tool>-alpha.json` と `tools/archive/<tool>-v<version>.json` を更新して commit、の順に進みます。`kind: native`（MMDAgent-EX）では、暗号化の前に Windows ランナーでのビルドとパッケージが入ります。
 
-   あわせて、各ツールのリポジトリ側にも開発者向けの記録として Release `v<version>` が自動作成されます（MMDAgent-EX は平文 zip と Quest APK と自動生成ノート、valles はノートのみ）。自動生成ノートには前タグ以降のマージ済み PR が並ぶため、バージョン間の差分の記録になります。リリースノートは `/release-alpha` スキルが所定の書式（日本語→英語、カテゴリ別サマリー、`#XX` 参照、制作者名なし）に清書します。
+   あわせて、各ツールのリポジトリ側にも開発者向けの記録として Release `v<version>` が自動作成されます（MMDAgent-EX は平文の Windows / macOS zip と Quest APK と自動生成ノート、valles はノートのみ）。自動生成ノートには前タグ以降のマージ済み PR が並ぶため、バージョン間の差分の記録になります。リリースノートは `/release-alpha` スキルが所定の書式（日本語→英語、カテゴリ別サマリー、`#XX` 参照、制作者名なし）に清書します。
 
 4. **alpha の**配布中バージョンが更新されたことを確認する
 
@@ -188,7 +188,7 @@ BETA でリンクを使わないのは、リンクの参加リクエストでは
 
 **Quest 用に別のタグを打つ必要はありません。** 上の `v1.2.0` の push で起動する `release.yml` が、Windows の配布 zip と並行して署名済み APK をビルドし、Meta Horizon の **ALPHA** チャネルへアップロードします。
 
-- MMDAgent-EX リポジトリの GitHub Release `vX.Y.Z` には、Windows の平文 zip と Quest APK（`MMDAgent-EX-Quest-<version>-versionCode<N>.apk`）が並びます。この `versionCode` が後の BETA 昇格でビルドを識別する鍵になります
+- MMDAgent-EX リポジトリの GitHub Release `vX.Y.Z` には、Windows / macOS の平文 zip と Quest APK（`MMDAgent-EX-Quest-<version>-versionCode<N>.apk`）が並びます。この `versionCode` が後の BETA 昇格でビルドを識別する鍵になります
 - `versionCode` は単調増加する番号です。値そのものに意味はなく、Meta が同一 versionCode の再アップロードを拒否するための識別子として使います
 - Quest 版のバージョン番号は Windows と常に同一です
 - 確認は Meta Horizon Developer Dashboard のビルド一覧で、その versionCode の ALPHA ビルドが現れていることを見ます
@@ -287,15 +287,28 @@ $env:LEELAB_CHANNEL = "alpha"; irm https://raw.githubusercontent.com/lee-lab/too
 - 日本語: https://mmdagent-ex-doc.netlify.app/ja/getting-started/install/
 - English: https://mmdagent-ex-doc.netlify.app/getting-started/install/
 
-### macOS（MMDAgent-EX のみの例外運用）
+### macOS（Apple Silicon）
 
-macOS は開発協力者向けの**オンデマンド配布**で、チャネル体制の外にあります。エンドユーザ配布は行いません。
+Windows と同じチャネル体制に乗っています。インストールも更新も**同じ 1 行**をターミナルで実行するだけです。
 
-- `/release-upload-mac` スキルで、既存の `vX.Y.Z` タグの GitHub Release に `MMDAgent-EX-vX.Y.Z-macos-arm64.zip` を添付します
-- Windows のリリースは GitHub Release を作らないため、対象タグに Release が無いのが普通です。その場合は**先に Release を作ってから**アセットを上げます
-- Apple Silicon (arm64) のみ、ad-hoc 署名のみ（初回起動は右クリック → 開く）
+```bash
+# beta（既定）
+curl -fsSL https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.sh | bash
 
-規定は MMDAgent-EX リポジトリの `CLAUDE.md`（`## Release Packaging`）にあります。
+# alpha（実験協力者）。変数はパイプの右側の bash に付ける（左に付けると curl にしか渡らない）
+curl -fsSL https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.sh | LEELAB_CHANNEL=alpha bash
+```
+
+- 対象は Apple Silicon（`hw.optional.arm64`）で、マニフェストの `min_macos` 以上の macOS。Intel Mac は対象外です
+- インストール先は `~/Library/Application Support/LeeLab/<tool>/app`、起動用の `~/Applications/<display_name>.app` をインストーラがその場で作ります。管理者権限は不要です
+- メニューに出るのは、選んだチャネルのマニフェストに `platforms.macos-arm64` があるツールだけです。macOS 版の無い版（`platforms` の無いマニフェスト）を指定されたときは「この版に macOS 版は無い」と案内して**何も変えずに 0 で終わります**
+- アンインストールは `~/Library/Application\ Support/LeeLab/<tool>/uninstall.sh`（`--yes` で確認なし）。`~/MMDAgent-Contents` などインストール先の外には触れません
+- パスワードは Windows と共通（同じ `PAYLOAD_PASSWORD` で暗号化）です
+- Gatekeeper の確認は通常出ません（理由は [development-notes.md](development-notes.md) の「macOS の配布形式」）
+
+手順ページは Windows と同じ URL です（macOS の節があります）。
+
+ツール側（MMDAgent-EX）でのビルドとマニフェストの書き込みは `release.yml` の `build-macos` / `publish-macos` が行います。詳細は MMDAgent-EX リポジトリの `dev/macos-distribution.md` を参照してください。
 
 ---
 
@@ -364,7 +377,7 @@ macOS は開発協力者向けの**オンデマンド配布**で、チャネル�
    | `kind` | `python`（省略時） / `native` |
    | `preserve` | **更新時に引き継ぐファイル・フォルダ**（後述） |
    | `shortcuts` | `desktop` / `start_menu` / `console_variant` の可否 |
-   | `notes` | インストール完了時に表示する補足（**英語で**） |
+   | `notes` | 補足（**英語で**）。install.ps1 は完了時、install.sh はダウンロード前に表示する |
    | `vscode_extensions` | 配布物に同梱した VS Code 拡張（`.vsix`）の一覧（任意、後述） |
 
    `kind: python` のみ:
@@ -425,6 +438,39 @@ Marketplace に出していない拡張を配布物に入れて、インスト�
 - インストーラは展開とショートカット作成のあと、`code` コマンド（VS Code の CLI）が PATH にあれば `code --install-extension <絶対パス> --force` を実行します
 - `code` が無い・失敗した・`file` が配布物に無い、のいずれでも**インストールは失敗させません**。`code` が無い・失敗したときは手動で入れるコマンドを表示し、`file` が配布物に無いときは「この版には含まれていない」と表示して先へ進みます。そのため、`.vsix` を同梱する前の版でマニフェストに書いておいても害はありません
 - アンインストール時は、`code` があれば列挙した `id` を `code --uninstall-extension` で外します
+
+### `platforms`（Windows 以外の配布物）
+
+Windows の項目（`package` / `exe` / `shortcuts` など）はそのままにして、他のプラットフォームの配布物を兄弟キー `platforms` に書きます。キーはプラットフォーム名で、現在は `macos-arm64`（`install.sh` が読む）だけです。`install.ps1` は `platforms` を読みません。
+
+```json
+"exe": "MMDAgent-EX.exe",
+"platforms": {
+  "macos-arm64": {
+    "package": {
+      "url": "https://github.com/lee-lab/tools-dist/releases/download/mmdagent-ex-v3.21.0/MMDAgent-EX-3.21.0-macos-arm64.zip.enc",
+      "sha256": "<復号後の zip の sha256>",
+      "encrypted": true,
+      "kdf_iterations": 200000
+    },
+    "exe": "MMDAgent-EX",
+    "min_macos": "15"
+  }
+}
+```
+
+| 項目 | 説明 |
+|---|---|
+| `package` | Windows の `package` と同じ形式。`sha256` は**復号後**の zip のもの。暗号化しないときは `encrypted` / `kdf_iterations` を書かない |
+| `exe` | 展開したフォルダ内の実行ファイル（必須）。起動用 `.app` はこれを `app/` を作業フォルダにして起動する |
+| `min_macos` | 最低対応 macOS のメジャー番号（文字列。例 `"15"`）。これより古い Mac ではインストールを断る |
+| `notes` / `preserve` / `vscode_extensions` / `args` | 任意。書けばトップレベルの同名項目より優先される。書かなければトップレベルの値を使う。ただし `notes` をトップレベルから借りるときは、`Windows` を含む行を表示しない |
+
+- zip の中身は Windows と同じく**ルートフォルダ 1 段**（zip 名と同じ名前）で、インストーラはそれを剥がして `app/` に置きます
+- `kind` は `native` であること（macOS で Python ツールを入れる経路はありません）
+- `platforms.macos-arm64` が無いマニフェストは「その版に macOS ビルドが無い」という意味です。前版の値を引き継がないこと（MMDAgent-EX の `publish` は雛形から `platforms` を必ず外し、`publish-macos` が付け直します）
+- キーは `plutil` のキーパス（`.` 区切り）で読むため、**キー名に `.` を含めないでください**
+- **beta への昇格で `platforms` はそのまま写ります。** `promote-beta.yml` は `tools/<tool>-alpha.json` をファイルごと `tools/<tool>.json` へ `cp` するだけなので、ワークフロー側の変更は不要です
 
 ### `requirements_hashed`（監査済み依存のハッシュ検証）
 
@@ -533,7 +579,15 @@ powershell -ExecutionPolicy Bypass -File tests\test-install.ps1
 powershell -ExecutionPolicy Bypass -File tests\test-install-flow.ps1
 ```
 
-どちらも何もインストールしないため、安全に実行できます。編集時の注意点は [CLAUDE.md](../CLAUDE.md) にまとめてあります。
+どちらも何もインストールしないため、安全に実行できます。
+
+`install.sh`（macOS）を変更したときは、Apple Silicon の Mac で次を通してください。HOME を一時フォルダに向けて走るため、実際の環境には何も入りません。
+
+```bash
+bash tests/test-install.sh
+```
+
+編集時の注意点は [CLAUDE.md](../CLAUDE.md) にまとめてあります。
 
 ### 廃止済みの旧経路（MMDAgent-EX）
 
@@ -549,5 +603,6 @@ powershell -ExecutionPolicy Bypass -File tests\test-install-flow.ps1
 | [user-guide.ja.md](user-guide.ja.md) / [user-guide.en.md](user-guide.en.md) | 利用者に渡すインストール手順 |
 | [CLAUDE.md](../CLAUDE.md) | インストーラを編集するときの注意点 |
 | MMDAgent-EX `dev/windows-distribution.md` | Windows 配布の仕組み（ツール側）— 配布物の中身、VC++ ランタイム同梱、欠落 DLL 検査 |
+| MMDAgent-EX `dev/macos-distribution.md` | macOS 配布の仕組み（ツール側）— パッケージの中身、dylib の同梱と ad-hoc 署名、最低対応 macOS、`platforms` の書き込み |
 | MMDAgent-EX `dev/android-cicd.md` | Quest 3 配布の仕組み — Meta 開発組織の初期設定、署名 keystore、versionCode 採番、BETA 昇格 |
 | 各ツールの `CLAUDE.md`（`## Channel Release`） | ツール名・タグ形式・ワークフローファイルの定義。`/release-alpha` と `/release-beta` はここを読んで動きます |

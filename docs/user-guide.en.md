@@ -4,6 +4,8 @@
 
 Runs on Windows 10 / 11 (64-bit). **You do not need to install Python or anything else first.**
 
+On a Mac with Apple Silicon, see [8. macOS (Apple Silicon)](#8-macos-apple-silicon). Sections 1-7 are about Windows.
+
 ---
 
 ## 1. Install
@@ -115,6 +117,73 @@ If you are short on space, you can delete the cache with the command below. This
 ```powershell
 & "$env:USERPROFILE\.local\bin\uv.exe" cache clean
 ```
+
+---
+
+## 8. macOS (Apple Silicon)
+
+Some tools also have a macOS version (currently **MMDAgent-EX**). The installer only offers the tools that do.
+
+**Requirements:** a Mac with Apple Silicon (M1 or later) and **macOS 15 or later**. Intel Macs are not supported. Nothing else needs to be installed first, and administrator rights are not required.
+
+### Install
+
+1. Open **Terminal** (Finder > Applications > Utilities > Terminal, or search for "Terminal" with Spotlight).
+
+2. Copy the line below, paste it in, and press Return.
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.sh | bash
+   ```
+
+3. When asked for a password, enter the one you received from your contact.
+   Nothing appears on screen while you type — this is normal.
+
+4. You are done when you see `was installed successfully.`
+
+The app is placed in the **Applications folder of your home folder** (`~/Applications`; in Finder choose Go > Home, then open Applications). You can also find it with Spotlight (Command + Space).
+
+### First launch
+
+Open it like any other app. **No security warning is expected**: the installer downloads the files itself, so macOS does not treat them as "downloaded from the internet".
+
+If macOS still says the app "cannot be opened" or "is damaged", open **System Settings > Privacy & Security**, scroll down, and click **Open Anyway** next to the message about the app. If that does not help, please contact us and tell us the exact message.
+
+### Update
+
+**Run exactly the same command again.** Your content is kept.
+
+### Release channels
+
+As on Windows, the plain command installs the default `beta` channel. For the `alpha` channel, put `LEELAB_CHANNEL=alpha` right before `bash` (after the `|`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lee-lab/tools-dist/main/install.sh | LEELAB_CHANNEL=alpha bash
+```
+
+Running a line again keeps you on its channel. Running the line of the other channel asks you to confirm before it switches.
+
+If the chosen channel has no macOS version of the tool yet, the installer says so and stops without changing anything.
+
+### Uninstall
+
+Run this in Terminal:
+
+```bash
+~/Library/Application\ Support/LeeLab/mmdagent-ex/uninstall.sh
+```
+
+It removes the app, its entry in your Applications folder, and the VS Code extension it added. **Your content in the `MMDAgent-Contents` folder of your home folder (`~/MMDAgent-Contents`) is not removed.**
+
+### Where things are
+
+| What | Where |
+|---|---|
+| The app | `~/Library/Application Support/LeeLab/mmdagent-ex/` |
+| The icon you start it from | `~/Applications/MMDAgent-EX.app` |
+| Your content (MMDAgent-EX) | `~/MMDAgent-Contents` — kept on update and on uninstall |
+
+**VS Code extension (MMDAgent-EX).** If Visual Studio Code is installed, the installer also adds the extension when the package includes it. Otherwise it shows the `code --install-extension ...` command to run later.
 
 ---
 

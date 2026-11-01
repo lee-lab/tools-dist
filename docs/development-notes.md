@@ -137,6 +137,26 @@ Valles の音声処理コア（valles#67）が依存する `pywebrtc-audio` は�
 
 マニフェストの `vscode_extensions` に挙げた `.vsix` は、PATH 上の `code`（Windows では `code.cmd`）で `--install-extension --force` する。エディタ支援は本体の動作に不要なので、`code` が無い・失敗したときは手動のコマンドを表示し、配布物に `.vsix` が無いときは含まれていない旨を表示して、いずれもインストールは続行する。アンインストール時は `code` があれば `--uninstall-extension` で外す（失敗は無視）。
 
+### macOS の配布形式（curl | bash + zip、.dmg は作らない）
+
+macOS 版（tools-dist#13、MMDAgent-EX のみ）は `install.sh` を `curl -fsSL ... | bash` で流し、暗号化 zip を展開する方式にした。
+
+- **Apple Developer ID が無い。** 配布物は ad-hoc 署名だけで、notarization もできない
+- **ブラウザで落としたファイルには `com.apple.quarantine` が付く。** .dmg でも zip でも同じで、quarantine 付きの ad-hoc 署名アプリは Gatekeeper に止められる。**macOS 15 以降は未署名アプリの「右クリック → 開く」による回避も無くなり**、「システム設定 → プライバシーとセキュリティ → このまま開く」か `xattr -dr com.apple.quarantine` が要る。非開発者に案内できる手順ではない
+- **curl が保存したファイルには quarantine が付かない。** 起動用の `~/Applications/<name>.app` もインストーラがその場で作るため quarantine が無く、Gatekeeper の評価自体が走らない。念のため展開後の `app/` にも `xattr -dr com.apple.quarantine` をかけている
+- 起動用 `.app` は最小のバンドル（`Info.plist` と、`app/` へ `cd` して本体を `exec` するだけの bash スクリプト）で、`codesign --force -s - --deep` で ad-hoc 署名する。本体を `.app` に作り替えないのは、MMDAgent-EX が実行ファイルの隣（`./MMDAgent-EX.mdf` など）を読む cwd 規約を変えないため
+- インストール先は Windows の `%LOCALAPPDATA%\LeeLab\<tool>\` に対応する `~/Library/Application Support/LeeLab/<tool>/`（`app/`・`install.json`・`uninstall.sh`）。更新は新しい `app/` を隣に展開し、`preserve` を旧 `app/` から写してから入れ替える。途中で失敗しても入っている版は壊れない
+
+### macOS でマニフェストを `plutil` で読む
+
+素の macOS に揃っているものだけで動かすため、JSON は **`plutil -extract <keypath> raw`** で読む（macOS 12 以降。インストーラ自身は 12 未満を断る）。
+
+- **python3 は使えない。** 素の Mac の `/usr/bin/python3` はスタブで、初回は Xcode コマンドラインツールの導入ダイアログを出して止まる
+- `plutil` は入れ子のキー（`platforms.macos-arm64.package.url`）、配列の添字（`vscode_extensions.0.file`）、要素数（配列に `raw` で件数が返る）、型（`plutil -type`）を扱える。null のキーがあっても他のキーは読める。キー名に `.` を含むものは指せないので、マニフェストのキーに `.` を使わない
+- `plutil -lint` は JSON を受け付けないため、形式の検査は `plutil -convert json -o /dev/null` で行う
+- `install.json` と起動用 `.app` の `Info.plist` も `plutil -insert` で組み立てる（エスケープを自前で書かないため）。`{}` だけのファイルは OpenStep 形式と解釈されるので、XML plist の雛形から作って最後に JSON へ変換している
+- 復号は `/usr/bin/openssl`（LibreSSL 3.3）の `enc -d -aes-256-cbc -pbkdf2 -iter N -md sha256`。CI（OpenSSL）・install.ps1（.NET）と同じ `tests/fixtures/sample.enc` で互換性を確かめている。パスワードは `-pass env:` で渡し、プロセス一覧に出さない
+
 ### 表示言語
 
 利用者に英語母語話者が含まれるため、**利用者が目にするものはすべて英語**にしています（インストーラの表示、生成されるアンインストーラ、ショートカット名、マニフェストの説明文、リリースノート）。コード内コメントと開発者向けドキュメントは日本語です。
@@ -203,6 +223,8 @@ BOM を外せるのは、ファイルに非 ASCII バイトが 1 つも無い場
 
 どちらも副作用が無いため安全に繰り返し実行できます。
 
+macOS の `install.sh` には `tests/test-install.sh` があります（Apple Silicon の Mac で実行）。`install.sh` を source して関数を個別に検証し、続いて HOME を一時フォルダに向けて `file://` の合成ツールで インストール → 更新 → チャネル切り替え → アンインストール を通します。`curl | bash` の経路（stdin がスクリプト本体）とファイル実行の経路の両方を走らせ、質問・パスワード入力・メニューは `expect`（macOS 標準）で疑似端末から答えて `/dev/tty` から読まれていることを確かめます。
+
 ### 実測値
 
 | 項目 | 値 |
@@ -238,7 +260,8 @@ lee-lab は GitHub Free プランであり、**組織シークレットは公開
 
 | ファイル | 内容 |
 |---|---|
-| [../install.ps1](../install.ps1) | 共通インストーラ |
+| [../install.ps1](../install.ps1) | 共通インストーラ（Windows） |
+| [../install.sh](../install.sh) | 共通インストーラ（macOS / Apple Silicon） |
 | [../CLAUDE.md](../CLAUDE.md) | インストーラを編集するときの注意点 |
 | [admin-guide.md](admin-guide.md) | リリース作業の手順 |
 | [../scripts/build-pyogg-wheel.sh](../scripts/build-pyogg-wheel.sh) | PyOgg wheel の再現ビルド |
